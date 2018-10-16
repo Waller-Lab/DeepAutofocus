@@ -2,10 +2,12 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy import interpolate, ndimage
+from joblib import Parallel, delayed
 
 from regressor import RegressorNetwork
-from imageprocessing import radialaverage, autocorrelate
+from imageprocessing import radialaverage
 from magellanhdf import MagellanHDFContainer
+
 
 def get_patch_metadata(data, split_k):
     shape = min([data.tileheight, data.tilewidth])
@@ -14,14 +16,13 @@ def get_patch_metadata(data, split_k):
     patches_per_image = (shape // patch_size) **2
     return patch_size, patches_per_image
 
-def calc_focal_plane(data, position_index, split_k):
+def calc_focal_plane(data, position_index, split_k, parallel=None):
     '''
     Calc power spectrum of phase images at different slices to determine optimal focal plane
     '''
     print("Calculating focal plane, position {} of {}".format(position_index, data.num_positions))
 
     def crop(image, index, split_k):
-        patch_size, patches_per_image = get_patch_metadata(data, split_k)
         y_tile_index = index // split_k
         x_tile_index = index % split_k
         return image[y_tile_index * patch_size:(y_tile_index + 1) * patch_size, x_tile_index * patch_size:(x_tile_index + 1) * patch_size]
@@ -33,11 +34,14 @@ def calc_focal_plane(data, position_index, split_k):
         return radialaverage(logpowerspectrummag)
 
     def compute_focal_plane(powerspectralist):
+        """
+        Compute focal plane from a list of radially averaged power spectra, interpolating to get sub-z spacing percision
+        :param powerspectralist: list of radially averaged power spectra
+        :return:
+        """
         powerspectra_arr = np.array(powerspectralist)
         # take sum of log power spectra (lower half
         pssum = np.sum(powerspectra_arr[:, powerspectra_arr.shape[1] // 4:], axis=1)
-        #TODO: look at how neccesary once got data with better dynamic range
-        pssum = ndimage.filters.gaussian_filter1d(pssum, 1.5, mode='nearest')
         # interpolate to find non integer best focal plane
         interpolant = interpolate.interp1d(np.arange(pssum.shape[0]), pssum, kind='cubic')
         xx = np.linspace(0, pssum.shape[0] - 1, 10000)
@@ -48,23 +52,22 @@ def calc_focal_plane(data, position_index, split_k):
         # plt.ylabel('High frequency content')
         return xx[np.argmax(yy)] * data.pixelsizeZ_um
 
+    patch_size, patches_per_image = get_patch_metadata(data, split_k)
     num_crops = split_k**2
-    powerspectra = []
+
+    radial_avg_power_spectrum = lambda image: calc_power_spectrum(crop(image, 0, 1))
+
     num_slices = data.get_num_slices_at(position_index)
-    first_z = None
-    for slice in range(num_slices):
-        #ignore edges which dont affet calculation if data collected symetrically
-        if slice < num_slices / 4 or slice > 3 * num_slices / 4:
-            continue
-        if first_z is None:
-            first_z = slice
-        print('slice {}'.format(slice))
-        image = data.read_image(channel_name='DPC_Bottom', relative_z_index=slice, position_index=position_index)
-        radialavg = calc_power_spectrum(crop(image, 0, 1))
-        powerspectra.append(radialavg)
+    #load images
+    images = [data.read_image(channel_name='DPC_Bottom', relative_z_index=slice, position_index=position_index)
+                for slice in range(num_slices)]
+    if parallel is None:
+        powerspectra = [radial_avg_power_spectrum(image) for image in images]
+    else:
+        powerspectra = parallel(delayed(radial_avg_power_spectrum)(image) for image in images)
 
     #Use same focal plane for all crops
-    focal_plane = compute_focal_plane(powerspectra) + first_z*data.pixelsizeZ_um
+    focal_plane = compute_focal_plane(powerspectra)
     best_focal_planes = {crop_index: focal_plane for crop_index in range(num_crops)}
     print('focal plane: {}'.format(focal_plane))
     return best_focal_planes
@@ -173,19 +176,19 @@ def read_patch(hdf_data, led_index, pos_index, slice_index, split_k, patch_index
     xy_slice = [[y_tile_index*patch_size, (y_tile_index+1)*patch_size],[x_tile_index*patch_size, (x_tile_index+1)*patch_size]]
     return hdf_data.read_image(channel_name=channel_name, position_index=pos_index, relative_z_index=slice_index, xy_slice=xy_slice)
 
-def read_or_calc_focal_planes(hdf, split_k, recalculate=False):
+def read_or_calc_focal_planes(hdf, split_k, n_cores=1, recalculate=False):
     """
     compute or load the pre-computed focal planes for each crop in each position
     :return:
     """
+    print('Getting focal plane for {}'.format(hdf.path))
     def get_name(pos_index):
         return 'pos{}_focal_plane'.format(pos_index)
 
-    focal_planes = {}
-    for pos_index in range(hdf.num_positions):
+    def read_or_compute(pos_index, parallel):
         if hdf.read_annotation(get_name(pos_index)) is None or recalculate:
             #calculate and save it
-            focal_plane = calc_focal_plane(hdf, pos_index, split_k=split_k)
+            focal_plane = calc_focal_plane(hdf, pos_index, split_k=split_k, parallel=parallel)
             for crop_index in focal_plane.keys():
                 hdf.write_annotation(get_name(pos_index), focal_plane[crop_index])
         else:
@@ -193,8 +196,16 @@ def read_or_calc_focal_planes(hdf, split_k, recalculate=False):
             focal_plane = {}
             for crop_index in range(split_k**2):
                 focal_plane[crop_index] = hdf.read_annotation(get_name(pos_index))
+        return focal_plane
 
-        focal_planes[pos_index] = focal_plane
+    if n_cores == 1:
+        #single threaded execution
+        focal_planes = {pos_index: read_or_compute(pos_index=pos_index) for pos_index in range(hdf.num_positions)}
+    else:
+        #parallelized
+        with Parallel(n_jobs=n_cores) as parallel:
+            focal_planes = {pos_index: read_or_compute(pos_index=pos_index, parallel=parallel) for pos_index in range(hdf.num_positions)}
+
     return focal_planes
 
 def read_or_calc_design_mat(hdf, focal_planes, deterministic_params, recalculate=False):
