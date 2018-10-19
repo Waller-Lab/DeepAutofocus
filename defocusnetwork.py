@@ -1,24 +1,32 @@
 import numpy as np
 import tensorflow as tf
-import tensorflow.contrib.eager as tfe
 import shutil
 import sys
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from imageprocessing import autocorrelate
-from scipy import ndimage
 
-class RegressorNetwork:
+class DefocusNetwork:
 
     def __init__(self, input_shape, train_generator, regressor_only=False, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None):
+        """
+        Constructor for defocus prediction network. If in 'train mode', go ahead and train the network.
+        The network will stop training when error on the validation set has not decreased for (val_overshoot_steps)
+        :param input_shape: Dimension of input used for training
+        :param train_generator: generator function to provide training examples
+        :param regressor_only: Only create the trainable part of the network (i.e. deterministic part is precomputed)
+        :param deterministic_params: arguments for specifiying architecture of deterministic part
+        :param val_generator: generator function for validation example
+        :param predict_input_shape: the shape of a raw image put into the network for inference mode
+        :param train_mode: 'train', 'load', or 'finetune'
+        """
 
-        # hyperparameters used for training
-        self.hyperparams = {'batch_size': 25, 'learning_rate': 1e-5, 'steps_per_validation': 25,
-                            'val_overshoot_steps': 5000, 'num_hidden_units': [100, 100, 100, 100, 100, 100, 100, 100, 100, 100], 'regularization_strength': 0.0,
-                            'dropout_rate': 0.0, 'input_dropout_rate': 0.6}
-        # parameters used for saving/logging
-        self.params = {'log_dir': './log', 'export_path': "./exported_model", 'checkpoint_path': './checkpoints', 'load_model_path': './datarun1_model'}
+        # hyperparameters for the trainable part of the network
+        self.hyper_params = {'batch_size': 25, 'learning_rate': 1e-5, 'steps_per_validation': 25,
+                        'val_overshoot_steps': 5000,
+                        'num_hidden_units': [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
+                        'regularization_strength': 0.0, 'dropout_rate': 0.0, 'input_dropout_rate': 0.6}
+        # directory paths for logging training, exporting trained model, checkpoints, and loading model
+        self.params = {'log_dir': './log', 'export_path': "./exported_model", 'checkpoint_path': './checkpoints',
+                       'load_model_path': './exported_model'}
         self.deterministic_params = deterministic_params
 
         self.regressor_only_mode = regressor_only
@@ -134,7 +142,7 @@ class RegressorNetwork:
             self.sess.run(train_op)
             # train_log_writer.add_summary(summary, global_step=step)
             # occasionally compute loss over whole validation set
-            if step % self.hyperparams['steps_per_validation'] == 0:
+            if step % self.hyper_params['steps_per_validation'] == 0:
                 # initialize validation iterator to go through entire validation set once
                 self.sess.run(validation_error_init_op)
                 # initialize or reinitialize RMSE so we can calculate it fresh over validation set
@@ -153,7 +161,7 @@ class RegressorNetwork:
                                                 global_step=step)
                     min_validation_error = error
                     min_error_step = step
-                elif step - min_error_step > self.hyperparams['val_overshoot_steps']:
+                elif step - min_error_step > self.hyper_params['val_overshoot_steps']:
                     break
             step += 1
             # print(step)
@@ -206,7 +214,8 @@ class RegressorNetwork:
         return design_mat
 
     def __del__(self):
-        self.sess.close()
+        if self.sess is not None:
+            self.sess.close()
 
     def _make_dataset(self, repeat, generator_fn):
         """
@@ -215,8 +224,8 @@ class RegressorNetwork:
         # and a "logical plan" of transformations that act on those elements.
         """
         if not self.regressor_only_mode:
-            types = ({led_index: tf.float32 for led_index in self.deterministic_params['led_indices']}, tf.float32)
-            shapes = ({led_index: tf.TensorShape(self.input_shape) for led_index in self.deterministic_params['led_indices']}, tf.TensorShape([]))
+            types = (tf.float32, tf.float32)
+            shapes = (tf.TensorShape(self.input_shape), tf.TensorShape([]))
         else: #design mat has already been computed
             types = (tf.float32, tf.float32)
             shapes = (tf.TensorShape([self.input_shape]), tf.TensorShape([]))
@@ -224,18 +233,11 @@ class RegressorNetwork:
         dataset = tf.data.Dataset.from_generator(generator_fn, types, shapes)
 
         if repeat:
-            return dataset.batch(self.hyperparams['batch_size']).repeat()
+            return dataset.batch(self.hyper_params['batch_size']).repeat()
         else:
-            return dataset.batch(self.hyperparams['batch_size'])
+            return dataset.batch(self.hyper_params['batch_size'])
 
     def _build_input_pipeline(self, graph_mode, dataset=None):
-        """
-        Extract data from tf.Dataset or somthing else at evaluation time
-        :param graph_mode:
-        :param dataset:
-        :param predict_input_shape:
-        :return:
-        """
         with tf.name_scope('{}_input'.format(graph_mode)):
             if graph_mode == 'evaluate':
                 iterator = dataset.make_initializable_iterator()
@@ -249,12 +251,6 @@ class RegressorNetwork:
                 return tf.placeholder(tf.float32, shape=[None, *self.predict_input_shape], name='input'), None, None
 
     def _build_deterministic_graph(self, input_tensor):
-        """
-        :param graph_mode:
-        :param dataset:
-        :param predict_input_shape:
-        :return: linescan, iterator over input images, target
-        """
         print('Building deterministic graph...')
 
         def fft_shift(matrix):
@@ -316,22 +312,19 @@ class RegressorNetwork:
             #subtract mean
             incoherent_sum = incoherent_sum - tf.reduce_mean(incoherent_sum)
 
-            if self.deterministic_params['architecture'] == 'fourier_magnitude':
-                #take magnitude of top quadrant of FT as feature vec
-                ft = tf.fft2d(tf.cast(incoherent_sum, tf.complex64))
-                ft_mag = tf.abs(ft)
-                #take low frequency part of fourier spectrum that encompasses the direction of th LED axis
-                dim = ft_mag.get_shape()[1].value
-                led_width_pix = int(self.deterministic_params['led_width'] * dim) //2
-                # divide this by two to exclude duplicatte information
-                non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim)
-                features = tf.concat(
-                    [tf.layers.flatten(ft_mag[:, :led_width_pix, :non_led_width_pix]),
-                     tf.layers.flatten(ft_mag[:, -led_width_pix:, :non_led_width_pix])],
-                    axis=1)
+            #take magnitude of top quadrant of FT as feature vec
+            ft = tf.fft2d(tf.cast(incoherent_sum, tf.complex64))
+            ft_mag = tf.abs(ft)
+            #take low frequency part of fourier spectrum that encompasses the direction of th LED axis
+            dim = ft_mag.get_shape()[1].value
+            led_width_pix = int(self.deterministic_params['led_width'] * dim) //2
+            # divide this by two to exclude duplicatte information
+            non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim)
+            features = tf.concat(
+                [tf.layers.flatten(ft_mag[:, :led_width_pix, :non_led_width_pix]),
+                 tf.layers.flatten(ft_mag[:, -led_width_pix:, :non_led_width_pix])],
+                axis=1)
 
-            else:
-                raise Exception('unknown mode')
 
             #l2 normalize
             normalized = features / tf.expand_dims(tf.norm(features, axis=1), axis=1)
@@ -357,21 +350,20 @@ class RegressorNetwork:
                 input_tensor = input_data
 
             normalized_input = (input_tensor - tf.constant(self.mean, dtype=tf.float32)) / tf.constant(self.stddev, dtype=tf.float32)
-            if self.deterministic_params['architecture'] == 'fourier_magnitude':
-                #a feature vector as input being fed into one or more hidden layers
-                normalized_input = tf.layers.dropout(normalized_input, training=graph_mode == 'training', rate=self.hyperparams['input_dropout_rate'])
-                # other layers (containing weights, biases as tf.Variables)
-                # regularizer = tf.contrib.layers.l1_regularizer(scale=self.hyperparams['regularization_strength'])
-                regularizer = tf.contrib.layers.l2_regularizer(scale=self.hyperparams['regularization_strength'])
-                current_layer = normalized_input
+            #a feature vector as input being fed into one or more hidden layers
+            normalized_input = tf.layers.dropout(normalized_input, training=graph_mode == 'training', rate=self.hyperparams['input_dropout_rate'])
+            # other layers (containing weights, biases as tf.Variables)
+            # regularizer = tf.contrib.layers.l1_regularizer(scale=self.hyper_params['regularization_strength'])
+            regularizer = tf.contrib.layers.l2_regularizer(scale=self.hyper_params['regularization_strength'])
+            current_layer = normalized_input
             index = 0
-            for num_hidden in self.hyperparams['num_hidden_units']:
+            for num_hidden in self.hyper_params['num_hidden_units']:
                 current_layer = tf.layers.dense(inputs=current_layer, units=num_hidden, activation=tf.nn.relu, name='hidden{}'.format(index),
                                          reuse=tf.AUTO_REUSE, kernel_regularizer=regularizer)
-                current_layer = tf.layers.dropout(current_layer, training=graph_mode == 'training', rate=self.hyperparams['dropout_rate'])
+                current_layer = tf.layers.dropout(current_layer, training=graph_mode == 'training', rate=self.hyper_params['dropout_rate'])
                 index += 1
             output = tf.layers.dense(inputs=current_layer, units=1, activation=None, name='output_weights', reuse=tf.AUTO_REUSE, kernel_regularizer=regularizer)
-            output = tf.layers.dropout(output, training=graph_mode == 'training', rate=self.hyperparams['dropout_rate'])
+            output = tf.layers.dropout(output, training=graph_mode == 'training', rate=self.hyper_params['dropout_rate'])
 
             predictions = tf.squeeze(output, axis=1, name="output")
             if graph_mode == 'predict':
@@ -386,7 +378,7 @@ class RegressorNetwork:
                 with tf.name_scope("loss_function"):
                     loss = tf.losses.mean_squared_error(target, predictions)
                     loss = tf.sqrt(loss)
-                    if self.hyperparams['regularization_strength'] == 0:
+                    if self.hyper_params['regularization_strength'] == 0:
                         total_loss = loss
                     else:
                         with tf.name_scope("regularization"):
@@ -394,8 +386,8 @@ class RegressorNetwork:
                             total_reg_loss = tf.add_n(reg_losses)
                         total_loss = total_reg_loss + loss
                 with tf.name_scope("optimizer"):
-                    train_step = tf.train.AdamOptimizer(self.hyperparams['learning_rate']).minimize(total_loss, global_step=tf.train.get_global_step())
-                    # train_step = tf.train.GradientDescentOptimizer(self.hyperparams['learning_rate']).minimize(loss, global_step=tf.train.get_global_step())
+                    train_step = tf.train.AdamOptimizer(self.hyper_params['learning_rate']).minimize(total_loss, global_step=tf.train.get_global_step())
+                    # train_step = tf.train.GradientDescentOptimizer(self.hyper_params['learning_rate']).minimize(loss, global_step=tf.train.get_global_step())
                 return train_step
             elif graph_mode == 'analyze': #for plotting error vs defocus distance
                 with tf.name_scope("analysis_metrics"):
