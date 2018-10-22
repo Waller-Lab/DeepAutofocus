@@ -215,17 +215,17 @@ class MagellanDataset:
                 self.image_height = res_level.reader_list[0].height
                 self.channel_names = self.summary_metadata['ChNames']
                 self.index_tree = res_level.reader_list[0].index_tree
-                #index tree is in c - z - t - p hierarchy,
+                #index tree is in c - z - t - p hierarchy, get all used indices to calcualte other orderings
                 channels = set(self.index_tree.keys())
                 slices = set()
                 frames = set()
                 positions = set()
                 for c in self.index_tree.keys():
-                    for z in self.index_tree:
+                    for z in self.index_tree[c]:
                         slices.add(z)
-                        for t in self.index_tree:
+                        for t in self.index_tree[c][z]:
                             frames.add(t)
-                            for p in self.index_tree:
+                            for p in self.index_tree[c][z][t]:
                                 positions.add(p)
                 #populate tree in a different ordering
                 self.p_t_z_c_tree = {}
@@ -242,7 +242,7 @@ class MagellanDataset:
                                         self.p_t_z_c_tree[p][t][z] = {}
                                     self.p_t_z_c_tree[p][t][z][c] = self.index_tree[c][z][t][p]
             else:
-                self.res_levels[int(res_dirs.split('x')[1])] = res_level
+                self.res_levels[int(res_dir.split('x')[1])] = res_level
 
     def _channel_name_to_index(self, channel_name):
         if channel_name not in self.channel_names:
@@ -303,6 +303,5 @@ class MagellanDataset:
         return len(list(self.p_t_z_c_tree.keys()))
 
 
-# MagellanDataset('/Users/henrypinkard/Desktop/Magellan data/testdata_1')
-
-
+d = MagellanDataset('/Users/henrypinkard/Desktop/Magellan data/testdata_1')
+print(d.get_num_xy_positions())
