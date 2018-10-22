@@ -20,7 +20,7 @@ class DefocusNetwork:
         """
 
         # hyperparameters for the trainable part of the network
-        self.hyper_params = {'batch_size': 25, 'learning_rate': 1e-5, 'steps_per_validation': 25,
+        self.hyper_params = {'batch_size': 25, 'learning_rate': 1e-3, 'steps_per_validation': 25,
                         'val_overshoot_steps': 5000,
                         'num_hidden_units': [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
                         'regularization_strength': 0.0, 'dropout_rate': 0.0, 'input_dropout_rate': 0.6}
@@ -372,7 +372,7 @@ class DefocusNetwork:
                 #use metric so it can be computed over bigger set than fits in memory
                 with tf.name_scope("Validation_metrics"):
                     rmse, update_op = tf.metrics.root_mean_squared_error(target, predictions)
-                    tf.summary.scalar("Validation RMSE", rmse)
+                    tf.summary.scalar("Validation_RMSE", rmse)
                 return (rmse, update_op), validation_iterator_init_op
             elif graph_mode == 'training':
                 with tf.name_scope("loss_function"):
