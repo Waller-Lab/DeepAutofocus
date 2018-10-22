@@ -351,7 +351,7 @@ class DefocusNetwork:
 
             normalized_input = (input_tensor - tf.constant(self.mean, dtype=tf.float32)) / tf.constant(self.stddev, dtype=tf.float32)
             #a feature vector as input being fed into one or more hidden layers
-            normalized_input = tf.layers.dropout(normalized_input, training=graph_mode == 'training', rate=self.hyperparams['input_dropout_rate'])
+            normalized_input = tf.layers.dropout(normalized_input, training=graph_mode == 'training', rate=self.hyper_params['input_dropout_rate'])
             # other layers (containing weights, biases as tf.Variables)
             # regularizer = tf.contrib.layers.l1_regularizer(scale=self.hyper_params['regularization_strength'])
             regularizer = tf.contrib.layers.l2_regularizer(scale=self.hyper_params['regularization_strength'])
