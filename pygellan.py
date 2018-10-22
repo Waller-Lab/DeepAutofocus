@@ -7,10 +7,11 @@ import numpy as np
 import sys
 import json
 
+
 class MagellanMultipageTiffReader:
     # Class corresponsing to a single multipage tiff file in a Micro-Magellan dataset. Pass the full path of the TIFF to
     # instantiate and call close() when finished
-    #TIFF constants
+    # TIFF constants
     WIDTH = 256
     HEIGHT = 257
     BITS_PER_SAMPLE = 258
@@ -26,7 +27,7 @@ class MagellanMultipageTiffReader:
     RESOLUTION_UNIT = 296
     MM_METADATA = 51123
 
-    #file format constants
+    # file format constants
     INDEX_MAP_OFFSET_HEADER = 54773648
     INDEX_MAP_HEADER = 3453623
     SUMMARY_MD_HEADER = 2355492
@@ -73,22 +74,25 @@ class MagellanMultipageTiffReader:
         if summary_md_header != self.SUMMARY_MD_HEADER:
             raise Exception('Index map offset header wrong')
         summary_md = json.loads(self.mmap_file[40:40 + summary_md_length])
-        index_map_header, index_map_length = np.frombuffer(self.mmap_file[40 + summary_md_length:48 + summary_md_length],
-                                                           dtype=np.uint32)
+        index_map_header, index_map_length = np.frombuffer(
+            self.mmap_file[40 + summary_md_length:48 + summary_md_length],
+            dtype=np.uint32)
         if index_map_header != self.INDEX_MAP_HEADER:
             raise Exception('Index map header incorrect')
         # get index map as nested list of ints
         index_map = [[int(index) for index in entry] for entry in np.reshape(np.frombuffer(
-            self.mmap_file[48 + summary_md_length:48 + summary_md_length + index_map_length * 20], dtype=np.uint32), [-1, 5])]
+            self.mmap_file[48 + summary_md_length:48 + summary_md_length + index_map_length * 20], dtype=np.uint32),
+            [-1, 5])]
         string_key_index_map = {'_'.join([str(ind) for ind in entry[:4]]): entry[4] for entry in index_map}
-        #unpack into a tree (i.e. nested dicts)
+        # unpack into a tree (i.e. nested dicts)
         index_tree = {}
         for c_index in set([line[0] for line in index_map]):
             for z_index in set([line[1] for line in index_map]):
                 for t_index in set([line[2] for line in index_map]):
                     for p_index in set([line[3] for line in index_map]):
-                        if '_'.join([str(c_index), str(z_index), str(t_index), str(p_index)]) in string_key_index_map.keys():
-                            #fill out tree as needed
+                        if '_'.join([str(c_index), str(z_index), str(t_index),
+                                     str(p_index)]) in string_key_index_map.keys():
+                            # fill out tree as needed
                             if c_index not in index_tree.keys():
                                 index_tree[c_index] = {}
                             if z_index not in index_tree[c_index].keys():
@@ -111,16 +115,22 @@ class MagellanMultipageTiffReader:
         bytes are next IFD offset location
         :return: dictionary with fields needed for reading
         """
-        num_entries = np.frombuffer(self._read(byte_offset, byte_offset+2), dtype=np.uint16)[0]
+        num_entries = np.frombuffer(self._read(byte_offset, byte_offset + 2), dtype=np.uint16)[0]
         info = {}
         for i in range(num_entries):
-            tag, type = np.frombuffer(self._read(byte_offset + 2 + i * 12, byte_offset + 2 + i * 12 + 4), dtype=np.uint16)
-            count = np.frombuffer(self._read(byte_offset + 2 + i * 12 + 4, byte_offset + 2 + i * 12 + 8), dtype=np.uint32)[0]
+            tag, type = np.frombuffer(self._read(byte_offset + 2 + i * 12, byte_offset + 2 + i * 12 + 4),
+                                      dtype=np.uint16)
+            count = \
+            np.frombuffer(self._read(byte_offset + 2 + i * 12 + 4, byte_offset + 2 + i * 12 + 8), dtype=np.uint32)[0]
             if type == 3 and count == 1:
-                value = np.frombuffer(self._read(byte_offset + 2 + i * 12 + 8, byte_offset + 2 + i * 12 + 10), dtype=np.uint16)[0]
+                value = \
+                np.frombuffer(self._read(byte_offset + 2 + i * 12 + 8, byte_offset + 2 + i * 12 + 10), dtype=np.uint16)[
+                    0]
             else:
-                value = np.frombuffer(self._read(byte_offset + 2 + i * 12 + 8, byte_offset + 2 + i * 12 + 12), dtype=np.uint32)[0]
-            #save important tags for reading images
+                value = \
+                np.frombuffer(self._read(byte_offset + 2 + i * 12 + 8, byte_offset + 2 + i * 12 + 12), dtype=np.uint32)[
+                    0]
+            # save important tags for reading images
             if tag == self.MM_METADATA:
                 info['md_offset'] = value
                 info['md_length'] = count
@@ -129,7 +139,7 @@ class MagellanMultipageTiffReader:
             elif tag == self.STRIP_BYTE_COUNTS:
                 info['bytes_per_image'] = value
         info['next_ifd_offset'] = np.frombuffer(self._read(byte_offset + num_entries * 12 + 2,
-                                                           byte_offset +num_entries * 12 + 6), dtype=np.uint32)[0]
+                                                           byte_offset + num_entries * 12 + 6), dtype=np.uint32)[0]
         if 'bytes_per_image' not in info or 'pixel_offset' not in info:
             raise Exception('Missing tags in IFD entry, file may be corrupted')
         return info
@@ -166,6 +176,7 @@ class MagellanResolutionLevel:
         tiff_names = [os.path.join(path, tiff) for tiff in os.listdir(path) if tiff.endswith('.tif')]
         self.reader_list = []
         self.reader_tree = {}
+        #populate list of readers and tree mapping indices to readers
         for tiff in tiff_names:
             reader = MagellanMultipageTiffReader(tiff)
             self.reader_list.append(reader)
@@ -183,7 +194,7 @@ class MagellanResolutionLevel:
                             self.reader_tree[c][z][t][p] = reader
 
     def read_image(self, channel_index=0, z_index=0, t_index=0, pos_index=0, read_metadata=False):
-        #determine which reader contains the image
+        # determine which reader contains the image
         reader = self.reader_tree[channel_index][z_index][t_index][pos_index]
         return reader.read_image(channel_index, z_index, t_index, pos_index, read_metadata)
 
@@ -199,23 +210,23 @@ class MagellanDataset:
 
     def __init__(self, dataset_path):
         res_dirs = [dI for dI in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, dI))]
-        #map from downsample factor to datset
+        # map from downsample factor to datset
         self.res_levels = {}
         for res_dir in res_dirs:
             res_dir_path = os.path.join(dataset_path, res_dir)
             res_level = MagellanResolutionLevel(res_dir_path)
             if res_dir == 'Full resolution':
                 self.res_levels[1] = res_level
-                #get summary metadata and index tree from full resolution image
+                # get summary metadata and index tree from full resolution image
                 self.summary_metadata = res_level.reader_list[0].summary_md
-                #store some fields explicitly for easy access
+                # store some fields explicitly for easy access
                 self.pixel_size_xy_um = self.summary_metadata['PixelSize_um']
                 self.pixel_size_z_um = self.summary_metadata['z-step_um']
                 self.image_width = res_level.reader_list[0].width
                 self.image_height = res_level.reader_list[0].height
                 self.channel_names = self.summary_metadata['ChNames']
-                self.index_tree = res_level.reader_list[0].index_tree
-                #index tree is in c - z - t - p hierarchy, get all used indices to calcualte other orderings
+                self.index_tree = res_level.reader_tree
+                # index tree is in c - z - t - p hierarchy, get all used indices to calcualte other orderings
                 channels = set(self.index_tree.keys())
                 slices = set()
                 frames = set()
@@ -227,13 +238,14 @@ class MagellanDataset:
                             frames.add(t)
                             for p in self.index_tree[c][z][t]:
                                 positions.add(p)
-                #populate tree in a different ordering
+                # populate tree in a different ordering
                 self.p_t_z_c_tree = {}
                 for p in positions:
                     for t in frames:
                         for z in slices:
                             for c in channels:
-                                if z in self.index_tree[c] and t in self.index_tree[c][z] and p in self.index_tree[c][z][t]:
+                                if z in self.index_tree[c] and t in self.index_tree[c][z] and p in \
+                                        self.index_tree[c][z][t]:
                                     if p not in self.p_t_z_c_tree:
                                         self.p_t_z_c_tree[p] = {}
                                     if t not in self.p_t_z_c_tree[p]:
@@ -262,12 +274,14 @@ class MagellanDataset:
         """
         if channel_name is not None:
             channel_index = self._channel_name_to_index(channel_name)
-        if channel_index in self.index_tree and z_index in self.index_tree[channel_index] and t_index in self.index_tree[
+        if channel_index in self.index_tree and z_index in self.index_tree[channel_index] and t_index in \
+                self.index_tree[
                     channel_index][z_index] and pos_index in self.index_tree[channel_index][z_index][t_index]:
             return True
         return False
 
-    def read_image(self, channel_name=None, channel_index=0, z_index=0, t_index=0, pos_index=0, read_metadata=False, downsample_factor=1):
+    def read_image(self, channel_name=None, channel_index=0, z_index=0, t_index=0, pos_index=0, read_metadata=False,
+                   downsample_factor=1):
         """
         Read image data as numpy array
         :param channel_name: Overrides channel index if supplied
@@ -303,5 +317,6 @@ class MagellanDataset:
         return len(list(self.p_t_z_c_tree.keys()))
 
 
-# d = MagellanDataset('/Users/henrypinkard/Desktop/Magellan data/testdata_1')
-# print(d.get_num_xy_positions())
+d = MagellanDataset(
+    '/home/henry/data/2018-9-27 Cells and histology af data/unstained path section 12x12 30um range 1um step_1')
+print(d.get_num_xy_positions())
