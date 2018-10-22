@@ -303,5 +303,5 @@ class MagellanDataset:
         return len(list(self.p_t_z_c_tree.keys()))
 
 
-d = MagellanDataset('/Users/henrypinkard/Desktop/Magellan data/testdata_1')
-print(d.get_num_xy_positions())
+# d = MagellanDataset('/Users/henrypinkard/Desktop/Magellan data/testdata_1')
+# print(d.get_num_xy_positions())
