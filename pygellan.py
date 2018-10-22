@@ -8,10 +8,8 @@ import sys
 import json
 
 class MagellanMultipageTiffReader:
-    """
-    Class corresponsing to a single multipage tiff file in a Micro-Magellan dataset. Pass the full path of the TIFF to
-    instantiate and call close() when finished
-    """
+    # Class corresponsing to a single multipage tiff file in a Micro-Magellan dataset. Pass the full path of the TIFF to
+    # instantiate and call close() when finished
     #TIFF constants
     WIDTH = 256
     HEIGHT = 257
@@ -195,6 +193,9 @@ class MagellanResolutionLevel:
 
 
 class MagellanDataset:
+    """
+    Class that opens a Micro-Magellan dataset
+    """
 
     def __init__(self, dataset_path):
         res_dirs = [dI for dI in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, dI))]
@@ -205,13 +206,103 @@ class MagellanDataset:
             res_level = MagellanResolutionLevel(res_dir_path)
             if res_dir == 'Full resolution':
                 self.res_levels[1] = res_level
+                #get summary metadata and index tree from full resolution image
+                self.summary_metadata = res_level.reader_list[0].summary_md
+                #store some fields explicitly for easy access
+                self.pixel_size_xy_um = self.summary_metadata['PixelSize_um']
+                self.pixel_size_z_um = self.summary_metadata['z-step_um']
+                self.image_width = res_level.reader_list[0].width
+                self.image_height = res_level.reader_list[0].height
+                self.channel_names = self.summary_metadata['ChNames']
+                self.index_tree = res_level.reader_list[0].index_tree
+                #index tree is in c - z - t - p hierarchy,
+                channels = set(self.index_tree.keys())
+                slices = set()
+                frames = set()
+                positions = set()
+                for c in self.index_tree.keys():
+                    for z in self.index_tree:
+                        slices.add(z)
+                        for t in self.index_tree:
+                            frames.add(t)
+                            for p in self.index_tree:
+                                positions.add(p)
+                #populate tree in a different ordering
+                self.p_t_z_c_tree = {}
+                for p in positions:
+                    for t in frames:
+                        for z in slices:
+                            for c in channels:
+                                if z in self.index_tree[c] and t in self.index_tree[c][z] and p in self.index_tree[c][z][t]:
+                                    if p not in self.p_t_z_c_tree:
+                                        self.p_t_z_c_tree[p] = {}
+                                    if t not in self.p_t_z_c_tree[p]:
+                                        self.p_t_z_c_tree[p][t] = {}
+                                    if z not in self.p_t_z_c_tree[p][t]:
+                                        self.p_t_z_c_tree[p][t][z] = {}
+                                    self.p_t_z_c_tree[p][t][z][c] = self.index_tree[c][z][t][p]
             else:
-                self.res_levels[int(res_dir[-1])] = res_level
+                self.res_levels[int(res_dirs.split('x')[1])] = res_level
 
-    def read_image(self, channel_index=0, z_index=0, t_index=0, pos_index=0, read_metadata=False, downsample_factor=1):
+    def _channel_name_to_index(self, channel_name):
+        if channel_name not in self.channel_names:
+            raise Exception('Invalid channel name')
+        return self.channel_names.index(channel_name)
+
+    def has_image(self, channel_name=None, channel_index=0, z_index=0, t_index=0, pos_index=0, downsample_factor=1):
+        """
+        Check if this image is present in the dataset
+        :param channel_name: Overrides channel index if supplied
+        :param channel_index:
+        :param z_index:
+        :param t_index:
+        :param pos_index:
+        :param downsample_factor:
+        :return:
+        """
+        if channel_name is not None:
+            channel_index = self._channel_name_to_index(channel_name)
+        if channel_index in self.index_tree and z_index in self.index_tree[channel_index] and t_index in self.index_tree[
+                    channel_index][z_index] and pos_index in self.index_tree[channel_index][z_index][t_index]:
+            return True
+        return False
+
+    def read_image(self, channel_name=None, channel_index=0, z_index=0, t_index=0, pos_index=0, read_metadata=False, downsample_factor=1):
+        """
+        Read image data as numpy array
+        :param channel_name: Overrides channel index if supplied
+        :param channel_index:
+        :param z_index:
+        :param t_index:
+        :param pos_index:
+        :param read_metadata: if True, return a tuple with dict of image metadata as second element
+        :param downsample_factor: 1 is full resolution, lower resolutions are powers of 2 if available
+        :return: image as 2D numpy array, or tuple with image and image metadata as dict
+        """
+        if channel_name is not None:
+            channel_index = self._channel_name_to_index(channel_name)
         res_level = self.res_levels[downsample_factor]
         return res_level.read_image(channel_index, z_index, t_index, pos_index, read_metadata)
 
     def close(self):
         for res_level in self.res_levels:
             res_level.close()
+
+    def get_num_z_slices_at(self, position_index, time_index=0):
+        """
+        return number of z slices (i.e. focal planes) at the given XY position
+        :param position_index:
+        :return:
+        """
+        return len(list(self.p_t_z_c_tree[position_index][time_index].keys()))
+
+    def get_num_xy_positions(self):
+        """
+        :return: total number of xy positons in data set
+        """
+        return len(list(self.p_t_z_c_tree.keys()))
+
+
+# MagellanDataset('/Users/henrypinkard/Desktop/Magellan data/testdata_1')
+
+

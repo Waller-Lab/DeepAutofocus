@@ -6,6 +6,9 @@ from joblib import Parallel, delayed
 
 from defocusnetwork import DefocusNetwork
 from imageprocessing import radialaverage
+from pygellan import MagellanDataset
+import h5py
+import os
 
 
 def get_patch_metadata(image_size, split_k):
@@ -296,3 +299,52 @@ def plot_results(pred, target, name, draw_rect=False):
         plt.gca().add_patch(mpatches.Rectangle([min_target, min_target+width/np.sqrt(2)], width, height, angle=-45, color=[1, 0, 0, 0.2]))
         plt.plot([min_target, max_target], [min_target, max_target], 'r-')
     print('{} RMSE: {}'.format(name, np.sqrt(np.mean((pred - target) ** 2))))
+
+class MagellanWithAnnotation(MagellanDataset):
+    """
+    This class takes the python wrapper for a Micro-Magellan dataset, and adds in the ability to store annoations in an
+    hdf5 file
+    """
+
+    def __init__(self, dataset_path):
+        super().__init__(dataset_path=dataset_path)
+        self.file = h5py.File(os.path.join(dataset_path, 'annotations'))
+
+    def write_annotation(self, name, value):
+        """
+        store string:scalar annotation in top level
+        """
+        self.file.attrs[name] = value
+        self.file.flush()
+
+    def read_annotation(self, name):
+        """
+        read a scalar annotation from top level
+        :return:
+        """
+        if name not in self.file.attrs:
+            return None
+        return self.file.attrs[name]
+
+    def store_array(self, name, array):
+        """
+        Store a numpy array. if array of the same name already exists, overwrite it
+        :param name:
+        :param array:
+        :return:
+        """
+        if name in self.file:
+            # delete and remake
+            del (self.file[name])
+        self.file.create_dataset(name, data=array)
+        self.file.flush()
+
+    def read_array(self, name):
+        """
+        Return a RAM copy of previously stored numoy array
+        """
+        if name in self.file:
+            return np.copy(self.file[name])
+        return None
+
+
