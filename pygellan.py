@@ -302,13 +302,13 @@ class MagellanDataset:
         for res_level in self.res_levels:
             res_level.close()
 
-    def get_num_z_slices_at(self, position_index, time_index=0):
+    def get_z_slices_at(self, position_index, time_index=0):
         """
-        return number of z slices (i.e. focal planes) at the given XY position
+        return list of z slice indices (i.e. focal planes) at the given XY position
         :param position_index:
         :return:
         """
-        return len(list(self.p_t_z_c_tree[position_index][time_index].keys()))
+        return list(self.p_t_z_c_tree[position_index][time_index].keys())
 
     def get_num_xy_positions(self):
         """
@@ -317,6 +317,6 @@ class MagellanDataset:
         return len(list(self.p_t_z_c_tree.keys()))
 
 
-d = MagellanDataset(
-    '/home/henry/data/2018-9-27 Cells and histology af data/unstained path section 12x12 30um range 1um step_1')
-print(d.get_num_xy_positions())
+# d = MagellanDataset(
+#     '/home/henry/data/2018-9-27 Cells and histology af data/unstained path section 12x12 30um range 1um step_1')
+# print(d.get_num_xy_positions())
