@@ -96,30 +96,30 @@ def calc_focal_plane(data, position_index, split_k, parallel=None, show_output=F
     print('focal plane: {}'.format(focal_plane))
     return best_focal_planes
 
-def generator_fn(data_wrapper_list, focal_planes, tile_split_k, ignore_first_slice=False):
+def generator_fn(data_wrapper_list, focal_planes, tile_split_k, position_indices_list, ignore_first_slice=False):
     """
     Function that generates pairs of training images and defocus distances used for training defocus prediction network
     :param data_wrapper_list list of DataWrappers
     :param focal_planes nested dict with DataWrapper, position index, and crop index as keys
-    :param deterministic_params number of crops to divide each image into for training
+    :param tile_split_k number of crops to divide each image into for training
+    :param position_indices_list list same length as data_wrapper_list that has list of position indices to use for each
+    dataset
     :param ignore_first_slice discard the top z slice (which was often not in the focal positon it was supposed to
     be on the system we used for testing)
     and true focal plane position as values
     :yield: dictionary with LED name key and image value for a random slice/position among
     valid slices and in the set of positions we specified
     """
-    for data_wrapper in data_wrapper_list:
-        num_positions = data_wrapper.get_num_xy_positions()
+    for data_wrapper, position_indices in zip(data_wrapper_list, position_indices_list):
         dataset_slice_pos_tuples = []
         #get all slice index position index combinations
-        for pos_index in range(num_positions):
+        for pos_index in position_indices:
             slice_indices = np.arange(data_wrapper.get_num_z_slices_at(position_index=pos_index))
             for z_index in slice_indices:
                 if z_index == 0 and ignore_first_slice:
                     continue
                 dataset_slice_pos_tuples.append((data_wrapper, z_index, pos_index))
     print('{} sliceposition tuples'.format(len(dataset_slice_pos_tuples)))
-    #split into training and validation
     indices = np.arange(len(dataset_slice_pos_tuples))
 
     def inner_generator(indices, focal_planes):
@@ -225,17 +225,19 @@ def read_or_calc_focal_planes(data_wrapper, split_k, n_cores=1, show_output=Fals
 
     return focal_planes
 
-def read_or_calc_design_mat(data_wrapper, focal_planes, deterministic_params):
+def read_or_calc_design_mat(data_wrapper, position_indices, focal_planes, deterministic_params):
     """
     Load a precomputed design matrix, or use the DefoucusNetwork class to compute it and then store for future use. The
     design matrix corresponds to the 'determninstic' beginning part of the graph (i.e. the Fourier transform)
     :param data_wrapper:
+    :param position_indices
     :param focal_planes:
     :param deterministic_params: dictionary of parameters describing the structure of the network
     :return:
     """
     param_id_string = str(deterministic_params)
-    generator = generator_fn([data_wrapper], focal_planes, tile_split_k=deterministic_params['tile_split_k'], ignore_first_slice=True)
+    generator = generator_fn([data_wrapper], focal_planes, tile_split_k=deterministic_params['tile_split_k'],
+                             position_indices_list=[position_indices], ignore_first_slice=True)
     # compute or read from storage deterministic outputs
     feature_name = 'features_' + param_id_string
     defocus_name = 'defocus_dists_' + param_id_string
@@ -252,15 +254,17 @@ def read_or_calc_design_mat(data_wrapper, focal_planes, deterministic_params):
         data_wrapper.store_array(defocus_name, defocus_dists)
     return features, defocus_dists
 
-def compile_deterministic_data(data_wrapper_list, focal_planes, deterministic_params):
+def compile_deterministic_data(data_wrapper_list, postion_indices_list, focal_planes, deterministic_params):
     """
     For all hdf wrappers in data, load design matrix and targets and concatenate them
     Puts the data that has already been fourier transformed and flattened into design matrix
     Computes this using a deterministic neural network if needed, otherwise loads it from the file
     to save time
+    :param data_wrapper_list list of DataWrapper objects to compute on
+    :param postion_indices_list corresponding list of position indices to use from each one
     """
-    deterministic_train_data = [read_or_calc_design_mat(dataset, focal_planes, deterministic_params) for
-                                                dataset in data_wrapper_list]
+    deterministic_train_data = [read_or_calc_design_mat(dataset, position_indices, focal_planes,
+                deterministic_params) for dataset, position_indices in zip(data_wrapper_list, postion_indices_list)]
     # collect training data from all experiments
     features = []
     targets = []
@@ -272,33 +276,6 @@ def compile_deterministic_data(data_wrapper_list, focal_planes, deterministic_pa
     targets = np.concatenate(targets)
     features = np.concatenate(features)
     return features, targets
-
-def average_predictions(pred, target, block_size):
-    """
-    Take the median of all predictions coming from a single raw image--that is, all crops that came from the same
-    original image
-    :param pred: numpy array predicted defocuses, where each consecutive (block_size) number of images correspond to
-    predictions that came from different crops of the same tile
-    :param target: numpy array of actual defocuses
-    :param block_size: crops per raw image
-    :return:
-    """
-    pred_consensus = np.median(np.reshape(pred, [-1, block_size]), axis=1)
-    target_consensus = np.median(np.reshape(target, [-1, block_size]), axis=1)
-    return pred_consensus, target_consensus
-
-def plot_results(pred, target, name, draw_rect=False):
-    plt.plot(target, pred, '.')
-    plt.xlabel('Target defocus (um)')
-    plt.ylabel('Predicted defocus (um)')
-    if draw_rect:
-        min_target = np.min(target)
-        max_target = np.max(target)
-        height = (max_target - min_target)*np.sqrt(2)
-        width = 2
-        plt.gca().add_patch(mpatches.Rectangle([min_target, min_target+width/np.sqrt(2)], width, height, angle=-45, color=[1, 0, 0, 0.2]))
-        plt.plot([min_target, max_target], [min_target, max_target], 'r-')
-    print('{} RMSE: {}'.format(name, np.sqrt(np.mean((pred - target) ** 2))))
 
 class MagellanWithAnnotation(MagellanDataset):
     """

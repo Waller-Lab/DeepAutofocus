@@ -176,7 +176,7 @@ class DefocusNetwork:
         print("Export complete")
         return predict_input_tensor, predict_output_tensor
 
-    def analyze_performance(self, generator_fn):
+    def predict_validation(self, generator_fn):
         """
         Compute predicted and target defocus for all data pairs provided by generator function
         :param generator_fn:
