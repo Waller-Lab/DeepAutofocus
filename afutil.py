@@ -235,7 +235,7 @@ def read_or_calc_design_mat(data_wrapper, position_indices, focal_planes, determ
     :param deterministic_params: dictionary of parameters describing the structure of the network
     :return:
     """
-    param_id_string = str(deterministic_params)
+    param_id_string = str(deterministic_params) + str(position_indices[0]) + '_' + str(len(position_indices))
     generator = generator_fn([data_wrapper], focal_planes, tile_split_k=deterministic_params['tile_split_k'],
                              position_indices_list=[position_indices], ignore_first_slice=True)
     # compute or read from storage deterministic outputs
@@ -277,6 +277,71 @@ def compile_deterministic_data(data_wrapper_list, postion_indices_list, focal_pl
     features = np.concatenate(features)
     return features, targets
 
+def plot_results(pred, target, draw_rect=False):
+    plt.plot(target, pred, '.')
+    plt.xlabel('Target defocus (um)')
+    plt.ylabel('Predicted defocus (um)')
+    if draw_rect:
+        min_target = np.min(target)
+        max_target = np.max(target)
+        height = (max_target - min_target)*np.sqrt(2)
+        width = 2
+        plt.gca().add_patch(mpatches.Rectangle([min_target, min_target+width/np.sqrt(2)], width, height,
+                                               angle=-45, color=[1, 0, 0, 0.2]))
+        plt.plot([min_target, max_target], [min_target, max_target], 'r-')
+
+#functions for calcuating the NA of an LED on the quasi-dome based on it's index for the quasi-dome illuminator
+def cartToNa(point_list_cart, z_offset=8):
+    """Function which converts a list of cartesian points to numerical aperture (NA)
+
+    Args:
+        point_list_cart: List of (x,y,z) positions relative to the sample (origin)
+        z_offset : Optional, offset of LED array in z, mm
+
+    Returns:
+        A 2D numpy array where the first dimension is the number of LEDs loaded and the second is (Na_x, NA_y)
+    """
+    yz = np.sqrt(point_list_cart[:, 1] ** 2 + (point_list_cart[:, 2] + z_offset) ** 2)
+    xz = np.sqrt(point_list_cart[:, 0] ** 2 + (point_list_cart[:, 2] + z_offset) ** 2)
+
+    result = np.zeros((np.size(point_list_cart, 0), 2))
+    result[:, 0] = np.sin(np.arctan(point_list_cart[:, 0] / yz))
+    result[:, 1] = np.sin(np.arctan(point_list_cart[:, 1] / xz))
+
+    return(result)
+
+def loadLedPositonsFromJson(file_name, z_offset=8):
+    """Function which loads LED positions from a json file
+    Args:
+        fileName: Location of file to load
+        zOffset : Optional, offset of LED array in z, mm
+        micro : 'TE300B' or 'TE300A'
+    Returns:
+        A 2D numpy array where the first dimension is the number of LEDs loaded and the second is (x, y, z) in mm
+    """
+    json_data = open(file_name).read()
+    data = json.loads(json_data)
+
+    source_list_cart = np.zeros((len(data['led_list']), 3))
+    x = [d['x'] for d in data['led_list']]
+    y = [d['y'] for d in data['led_list']]
+    z = [d['z'] for d in data['led_list']]
+
+    source_list_cart[:, 0] = x
+    source_list_cart[:, 1] = y
+    source_list_cart[:, 2] = z
+
+    source_list_na = cartToNa(source_list_cart, z_offset=z_offset)
+
+    return source_list_na, source_list_cart
+
+def get_led_na(led_index):
+    source_list_na, source_list_cart = loadLedPositonsFromJson('quasi_dome_design.json')
+    angles_xy = np.arcsin(np.abs(source_list_na))
+    angle = np.arctan(np.sqrt(np.tan(angles_xy[:, 0])**2 + np.tan(angles_xy[:, 1])**2 ))
+    return np.sin(angle[led_index - 1])
+        
+        
 class MagellanWithAnnotation(MagellanDataset):
     """
     This class takes the python wrapper for a Micro-Magellan dataset, and adds in the ability to store annoations in an

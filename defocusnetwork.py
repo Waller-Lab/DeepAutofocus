@@ -20,8 +20,8 @@ class DefocusNetwork:
         """
 
         # hyperparameters for the trainable part of the network
-        self.hyper_params = {'batch_size': 25, 'learning_rate': 1e-3, 'steps_per_validation': 25,
-                        'val_overshoot_steps': 5000,
+        self.hyper_params = {'batch_size': 25, 'learning_rate': 2e-5, 'steps_per_validation': 25,
+                        'val_overshoot_steps': 2000,
                         'num_hidden_units': [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
                         'regularization_strength': 0.0, 'dropout_rate': 0.0, 'input_dropout_rate': 0.6}
         # directory paths for logging training, exporting trained model, checkpoints, and loading model
@@ -36,31 +36,30 @@ class DefocusNetwork:
         self.val_generator = val_generator
         self.train_mode = train_mode
 
-
-        if train_mode == 'train':
-            #not using deterministic front end, but rather trainable backend
-            self.sess = tf.Session()
-            self._compute_normalizations(self.train_generator)
-            predict_input_op, predict_output_op = self._train()
-            self.predict_input_op = predict_input_op
-            self.predict_output_op = predict_output_op
-        elif train_mode == 'load':
-            self.sess = tf.Session()
-            #load full saved model instead of training
-            tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING],  self.params['load_model_path'])
-            self.predict_input_op = tf.get_default_graph().get_tensor_by_name('deterministic/Log:0')
-            self.predict_output_op = tf.get_default_graph().get_tensor_by_name('predict_network/output:0')
-        elif train_mode == 'finetune':
-            #load the normalization values form the old graph
-            with tf.Session() as loading_session:
-                tf.saved_model.loader.load(loading_session, [tf.saved_model.tag_constants.SERVING],  self.params['load_model_path'])
+        #clear everyhting so other instances of this class wont interfere with this one
+        tf.reset_default_graph()
+        
+        with tf.Session() as self.sess:
+            if train_mode == 'train':
+                #not using deterministic front end, but rather trainable backend
+                self._compute_normalizations(self.train_generator)
+                predict_input_op, predict_output_op = self._train()
+                self.predict_input_op = predict_input_op
+                self.predict_output_op = predict_output_op
+            elif train_mode == 'load':
+                #load full saved model instead of training
+                tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING],  self.params['load_model_path'])
+                self.predict_input_op = tf.get_default_graph().get_tensor_by_name('deterministic/Log:0')
+                self.predict_output_op = tf.get_default_graph().get_tensor_by_name('predict_network/output:0')
+            elif train_mode == 'finetune':
+                #load the normalization values form the old graph          
+                tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
                 self.mean = loading_session.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const:0'))
                 self.stddev = loading_session.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const_1:0'))
-            tf.reset_default_graph()
-            self.sess = tf.Session()
-            predict_input_op, predict_output_op = self._train(load_variables=True)
-            self.predict_input_op = predict_input_op
-            self.predict_output_op = predict_output_op
+                tf.reset_default_graph()
+                predict_input_op, predict_output_op = self._train(load_variables=True)
+                self.predict_input_op = predict_input_op
+                self.predict_output_op = predict_output_op
 
     def evaluate_deterministic_graph(self):
         """
@@ -68,15 +67,15 @@ class DefocusNetwork:
         Used either for precomputing deterministic part of graph or for calculating training normalizations
         :return:
         """
-        # iterate over entire dataset to comput normalizations
-        normalization_dataset = self._make_dataset(repeat=False, generator_fn=self.train_generator)
-        input_data_op, target_op, _ = self._build_input_pipeline('training', dataset=normalization_dataset)
-        linescan_op = self._build_deterministic_graph(input_data_op)
-        linescans = None
-        targets = None
-        print("Evaluating deterministic graph over training set...")
-        i = 0
         with tf.Session() as sess:
+            # iterate over entire dataset to comput normalizations
+            normalization_dataset = self._make_dataset(repeat=False, generator_fn=self.train_generator)
+            input_data_op, target_op, _ = self._build_input_pipeline('training', dataset=normalization_dataset)
+            linescan_op = self._build_deterministic_graph(input_data_op)
+            linescans = None
+            targets = None
+            print("Evaluating deterministic graph over training set...")
+            i = 0
             while True:
                 print('batch {}'.format(i))
                 i += 1
@@ -176,7 +175,7 @@ class DefocusNetwork:
         print("Export complete")
         return predict_input_tensor, predict_output_tensor
 
-    def predict_validation(self, generator_fn):
+    def predict(self, generator_fn):
         """
         Compute predicted and target defocus for all data pairs provided by generator function
         :param generator_fn:
@@ -185,12 +184,24 @@ class DefocusNetwork:
         """
         prediction = np.array([])
         target = np.array([])
-        for input in generator_fn():
-            pred_new = self.sess.run(self.predict_output_op, {self.predict_input_op: np.reshape(input[0],[1,-1])})
-            prediction = np.concatenate((prediction, pred_new))
-            target = np.concatenate((target, np.array([input[1]])))
+        with tf.Session() as self.sess:
+            for input in generator_fn():
+                pred_new = self.sess.run(self.predict_output_op, {self.predict_input_op: np.reshape(input[0],[1,-1])})
+                prediction = np.concatenate((prediction, pred_new))
+                target = np.concatenate((target, np.array([input[1]])))
 
-        return prediction, target
+            pred_consensus, target_consensus = self._combine_predictions(prediction,target)
+        return pred_consensus, target_consensus
+    
+    def _combine_predictions(self, pred, target):
+        """
+        Take the median of all predictions coming from a single raw image--that is, all crops that came from the same
+        original image
+        """
+        block_size = self.deterministic_params['tile_split_k'] ** 2
+        pred_consensus = np.median(np.reshape(pred, [-1, block_size]), axis=1)
+        target_consensus = np.median(np.reshape(target, [-1, block_size]), axis=1)
+        return pred_consensus, target_consensus
 
     def _compute_normalizations(self, generator_fn):
         # going to train, rather than compute something deterministic, so compute normalization
