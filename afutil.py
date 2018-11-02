@@ -236,8 +236,6 @@ def read_or_calc_design_mat(data_wrapper, position_indices, focal_planes, determ
     :return:
     """
     param_id_string = str(deterministic_params) + str(position_indices[0]) + '_' + str(len(position_indices))
-    generator = generator_fn([data_wrapper], focal_planes, tile_split_k=deterministic_params['tile_split_k'],
-                             position_indices_list=[position_indices], ignore_first_slice=True)
     # compute or read from storage deterministic outputs
     feature_name = 'features_' + param_id_string
     defocus_name = 'defocus_dists_' + param_id_string
@@ -246,9 +244,11 @@ def read_or_calc_design_mat(data_wrapper, position_indices, focal_planes, determ
     if features is None:
         patch_size, patches_per_image = get_patch_metadata((data_wrapper.get_image_width(),
                                                 data_wrapper.get_image_height()), deterministic_params['tile_split_k'])
+        generator = generator_fn([data_wrapper], focal_planes, tile_split_k=deterministic_params['tile_split_k'],
+                             position_indices_list=[position_indices], ignore_first_slice=True)
         #Use the deterministic part of the network only to compute design matrix
         network = DefocusNetwork(input_shape=(patch_size, patch_size), train_generator=generator,
-                                     deterministic_params=deterministic_params, regressor_only=False)
+                                     deterministic_params=deterministic_params)
         features, defocus_dists = network.evaluate_deterministic_graph()
         data_wrapper.store_array(feature_name, features)
         data_wrapper.store_array(defocus_name, defocus_dists)

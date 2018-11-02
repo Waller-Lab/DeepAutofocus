@@ -2,17 +2,19 @@ import numpy as np
 import tensorflow as tf
 import shutil
 import sys
+import os
 
 class DefocusNetwork:
 
-    def __init__(self, input_shape, train_generator, regressor_only=False, deterministic_params=None,
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    
+    def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None):
         """
         Constructor for defocus prediction network. If in 'train mode', go ahead and train the network.
         The network will stop training when error on the validation set has not decreased for (val_overshoot_steps)
         :param input_shape: Dimension of input used for training
         :param train_generator: generator function to provide training examples
-        :param regressor_only: Only create the trainable part of the network (i.e. deterministic part is precomputed)
         :param deterministic_params: arguments for specifiying architecture of deterministic part
         :param val_generator: generator function for validation example
         :param predict_input_shape: the shape of a raw image put into the network for inference mode
@@ -29,7 +31,6 @@ class DefocusNetwork:
                        'load_model_path': './exported_model'}
         self.deterministic_params = deterministic_params
 
-        self.regressor_only_mode = regressor_only
         self.input_shape = input_shape
         self.predict_input_shape = predict_input_shape
         self.train_generator = train_generator
@@ -39,27 +40,28 @@ class DefocusNetwork:
         #clear everyhting so other instances of this class wont interfere with this one
         tf.reset_default_graph()
         
-        with tf.Session() as self.sess:
-            if train_mode == 'train':
-                #not using deterministic front end, but rather trainable backend
-                self._compute_normalizations(self.train_generator)
-                predict_input_op, predict_output_op = self._train()
-                self.predict_input_op = predict_input_op
-                self.predict_output_op = predict_output_op
-            elif train_mode == 'load':
-                #load full saved model instead of training
-                tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING],  self.params['load_model_path'])
-                self.predict_input_op = tf.get_default_graph().get_tensor_by_name('deterministic/Log:0')
-                self.predict_output_op = tf.get_default_graph().get_tensor_by_name('predict_network/output:0')
-            elif train_mode == 'finetune':
-                #load the normalization values form the old graph          
-                tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
-                self.mean = loading_session.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const:0'))
-                self.stddev = loading_session.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const_1:0'))
-                tf.reset_default_graph()
-                predict_input_op, predict_output_op = self._train(load_variables=True)
-                self.predict_input_op = predict_input_op
-                self.predict_output_op = predict_output_op
+        if train_mode is not None:
+            with tf.Session() as self.sess:
+                if train_mode == 'train':
+                    #not using deterministic front end, but rather trainable backend
+                    self._compute_normalizations(self.train_generator)
+                    predict_input_op, predict_output_op = self._train()
+                    self.predict_input_op = predict_input_op
+                    self.predict_output_op = predict_output_op
+                elif train_mode == 'load':
+                    #load full saved model instead of training
+                    tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
+                    self.predict_input_op = tf.get_default_graph().get_tensor_by_name('deterministic/Log:0')
+                    self.predict_output_op = tf.get_default_graph().get_tensor_by_name('predict_network/output:0')
+                elif train_mode == 'finetune':
+                    #load the normalization values form the old graph          
+                    tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
+                    self.mean = loading_session.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const:0'))
+                    self.stddev = loading_session.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const_1:0'))
+                    tf.reset_default_graph()
+                    predict_input_op, predict_output_op = self._train(load_variables=True)
+                    self.predict_input_op = predict_input_op
+                    self.predict_output_op = predict_output_op
 
     def evaluate_deterministic_graph(self):
         """
@@ -234,7 +236,7 @@ class DefocusNetwork:
         from TF docs: A Dataset can be used to represent an input pipeline as a collection of elements (nested structures of tensors)
         # and a "logical plan" of transformations that act on those elements.
         """
-        if not self.regressor_only_mode:
+        if  self.train_mode is not None:
             types = (tf.float32, tf.float32)
             shapes = (tf.TensorShape(self.input_shape), tf.TensorShape([]))
         else: #design mat has already been computed
