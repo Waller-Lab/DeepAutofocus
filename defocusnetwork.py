@@ -6,7 +6,7 @@ import os
 
 class DefocusNetwork:
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None):
@@ -23,7 +23,7 @@ class DefocusNetwork:
 
         # hyperparameters for the trainable part of the network
         self.hyper_params = {'batch_size': 25, 'learning_rate': 2e-5, 'steps_per_validation': 25,
-                        'val_overshoot_steps': 2000,
+                        'val_overshoot_steps': 1000,
                         'num_hidden_units': [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
                         'regularization_strength': 0.0, 'dropout_rate': 0.0, 'input_dropout_rate': 0.6}
         # directory paths for logging training, exporting trained model, checkpoints, and loading model
