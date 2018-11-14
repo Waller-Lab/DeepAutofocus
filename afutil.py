@@ -9,6 +9,7 @@ from imageprocessing import radialaverage
 from pygellan import MagellanDataset
 import h5py
 import os
+from magellanhdf import MagellanHDFContainer
 
 
 def get_patch_metadata(image_size, split_k):
@@ -35,7 +36,7 @@ def calc_focal_plane(data, position_index, split_k, parallel=None, show_output=F
     :param show_output if supplied, create a plot showing the calculation of th ground truth focal plane
     :return:
     """
-    print("Calculating focal plane, position {} of {}".format(position_index, data.get_num_xy_positions()))
+   # print("\rCalculating focal plane, position {} of {}   ".format(position_index, data.get_num_xy_positions()),end='')
 
     def crop(image, index, split_k):
         """
@@ -93,7 +94,8 @@ def calc_focal_plane(data, position_index, split_k, parallel=None, show_output=F
     #Use same focal plane for all crops
     focal_plane = compute_focal_plane(powerspectra)
     best_focal_planes = {crop_index: focal_plane for crop_index in range(num_crops)}
-    print('focal plane: {}'.format(focal_plane))
+    print("\rCalculated focal plane, position {} of {}: {:.3f}".format(position_index, 
+                                                             data.get_num_xy_positions(),focal_plane),end='')
     return best_focal_planes
 
 def generator_fn(data_wrapper_list, focal_planes, tile_split_k, position_indices_list, ignore_first_slice=False):
@@ -119,7 +121,7 @@ def generator_fn(data_wrapper_list, focal_planes, tile_split_k, position_indices
                 if z_index == 0 and ignore_first_slice:
                     continue
                 dataset_slice_pos_tuples.append((data_wrapper, z_index, pos_index))
-    print('{} sliceposition tuples'.format(len(dataset_slice_pos_tuples)))
+    print('{} sliceposition tuples\r'.format(len(dataset_slice_pos_tuples)),end='')
     indices = np.arange(len(dataset_slice_pos_tuples))
 
     def inner_generator(indices, focal_planes):
@@ -207,7 +209,8 @@ def read_or_calc_focal_planes(data_wrapper, split_k, n_cores=1, show_output=Fals
             for crop_index in focal_plane.keys():
                 data_wrapper.store_focal_plane(get_name(pos_index), focal_plane[crop_index])
         else:
-            print('Reading precomputed focal plane')
+            print('Reading precomputed focal plane pos index {} of {}\r'.format(pos_index, 
+                                                                     data_wrapper.get_num_xy_positions()),end='')
             #read saved value from previous computation
             focal_plane = {}
             for crop_index in range(split_k**2):
@@ -389,4 +392,105 @@ class MagellanWithAnnotation(MagellanDataset):
             return np.copy(self.file[name])
         return None
 
+    
+class HDFDataWrapper:
+    """
+    Version that reads the deprecated magellan hdf files
+    """
+
+    def __init__(self, path):
+        self.hdf = MagellanHDFContainer(path)
+
+
+    def read_ground_truth_image(self, position_index, z_index):
+        """
+        Read image in which focus quality can be measured form quality of image
+        :param pos_index: index of xy position
+        :param z_index: index of z slice (starting at 0)
+        :param xy_slice: (cropped region of image)
+        :return:
+        """
+        return self.hdf.read_image(channel_name='DPC_Bottom', position_index=position_index, 
+                                   relative_z_index=z_index)
+
+    def read_prediction_image(self, position_index, z_index, patch_index, split_k):
+        """
+        Read image used for single shot prediction (i.e. single LED image)
+        :param pos_index: index of xy position
+        :param z_index: index of z slice (starting at 0)
+        :param split_k: number of crops along each dimension
+        :param patch_index: index of the crop
+        :return:
+        """
+        patch_size, patches_per_image = get_patch_metadata((self.get_image_width(),
+                                                            self.get_image_height()), split_k)
+        y_tile_index = patch_index // split_k
+        x_tile_index = patch_index % split_k
+        xy_slice = [[y_tile_index * patch_size, (y_tile_index + 1) * patch_size],
+                    [x_tile_index * patch_size, (x_tile_index + 1) * patch_size]]
+        return self.hdf.read_image(channel_name='autofocus', position_index=position_index,
+                                   relative_z_index=z_index, xy_slice=xy_slice)
+
+    def get_image_width(self):
+        """
+        :return: image width in pixels
+        """
+        return self.hdf.tilewidth
+
+    def get_image_height(self):
+        """
+        :return: image height in pixels
+        """
+        return self.hdf.tileheight
+
+    def get_num_z_slices_at(self, position_index):
+        """
+        return number of z slices (i.e. focal planes) at the given XY position
+        :param position_index:
+        :return:
+        """
+        return self.hdf.get_num_slices_at(position_index)
+
+    def get_pixel_size_z_um(self):
+        """
+        :return: distance in um between consecutive z slices
+        """
+        return self.hdf.pixelsizeZ_um
+
+    def get_num_xy_positions(self):
+        """
+        :return: total number of xy positons in data set
+        """
+        return self.hdf.num_positions
+
+    def store_focal_plane(self, name, focal_position):
+        """
+        Store the computed focal plane as a string, float pair
+        """
+        self.hdf.write_annotation(name, focal_position)
+
+    def read_focal_plane(self, name):
+        """
+        read a previously computed focal plane
+        :param name: key corresponding to an xy position for whch focal plane has already been computed
+        :return:
+        """
+        return self.hdf.read_annotation(name)
+
+    def store_array(self, name, array):
+        """
+        Store a numpy array containing the design matrix for training the non-deterministic part of the network (i.e.
+        after the Fourier transform) so that it can be retrained quickly without having to recompute
+        :param name:
+        :param array: (n examples) x (d feature length) numpy array
+        """
+        self.hdf.store_array(name, array)
+
+    def read_array(self, name):
+        """
+        Read and return a previously computed array
+        :param name:
+        :return:
+        """
+        return self.hdf.read_array(name)
 

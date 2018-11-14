@@ -2,7 +2,6 @@ import numpy as np
 import h5py
 # from magellan_data import MagellanJavaWrapper
 import ast
-from util.imageprocessing import exporttiffstack
 
 
 def hdfdatapath(channel_name, time_index=0, position_index=0):
@@ -178,32 +177,6 @@ class MagellanHDFContainer:
         pos_md = self.summary_metadata['InitialPositionList'][position_index]
         return (pos_md['GridRowIndex'], pos_md['GridColumnIndex'])
 
-    def export(self, mode):
-        """
-        Export currently displayed tile to a TIFF stack
-        """
-        if mode == 'channels':
-            #export all channels at current tile
-            datacube = np.zeros((len(self.channelnames), self.tileheight, self.tilewidth),dtype=np.uint16)
-            for i, channelname in enumerate(self.channelnames):
-                datacube[i, ...] = self.read_image(channel_name=channelname,
-                                position_index=self.display_position_index, relative_z_index=self.display_slice_index)
-        elif mode == 'frames':
-            #export time series
-            datacube = np.zeros((self.num_time_points, self.tileheight, self.tilewidth))
-            for image_index in range(datacube.shape[0]):
-                datacube[image_index, ...] = self.read_image(self.channelnames[self.display_channel_index],
-                                                             time_index=image_index)
-        elif mode == 'slices':
-            # export z stack
-            datacube = np.zeros((self.get_num_slices_at(self.display_position_index), self.tileheight, self.tilewidth))
-            for slice_index in range(datacube.shape[0]):
-                datacube[slice_index, ...] = self.read_image(channel_index=self.display_channel_index,
-                                                    position_index=self.display_position_index, relative_z_index=slice_index)
-
-        #I think I put this here to not have to worry about the depency in conversion to HDF code
-        exporttiffstack(datacube)
-
 
     # def converttoglobalcoordinates(self,row,col,x,y):
     #     """
@@ -257,76 +230,3 @@ class MagellanHDFContainer:
 
     def close(self):
         self.file.close()
-
-def magellantohdf(path, print_progress=True):
-    """
-    Read Magellan dataset image data and metadata and put it into the HDF file
-    :param path: Magellan directory
-    :param path: fraction of positions to include (for downsampling purposes)
-    """
-    outputname = path + '.hdf'
-    file = h5py.File(outputname, "w")
-    #open magellan data
-    magellanwrap = MagellanJavaWrapper(path)
-    file.attrs['summary_metadata'] = str(magellanwrap.summary_metadata)
-    #add whole dataset summary metadata
-    file.attrs['RGB'] = magellanwrap.rgb
-    file.attrs['ByteDepth'] = magellanwrap.byte_depth
-    file.attrs['NumRows'] = magellanwrap.num_rows
-    file.attrs['NumCols'] = magellanwrap.num_cols
-    file.attrs['TileWidth'] = magellanwrap.tile_width
-    file.attrs['TileHeight'] = magellanwrap.tile_height
-    file.attrs['PixelSizeZ_um'] = magellanwrap.summary_metadata['z-step_um']
-    file.attrs['PixelSizeXY_um'] = magellanwrap.summary_metadata['PixelSize_um']
-    channel_names = list(magellanwrap.channel_names)
-    keys = magellanwrap.image_keys
-    file.create_dataset('image_keys', data=np.array(keys))
-    file.attrs['ChannelNames'] = np.array(channel_names, dtype=np.string_)
-    # iterate through all images and add them to HDF file
-    #Organize keys in a tree so the slices and channels at each position can be easily accessed
-    frames = set([indices[2] for indices in keys])
-    key_tree = {}
-    for frame in frames:
-        #find all positions at frame
-        keys_at_frame = [key for key in keys if key[2] == frame]
-        positions_at_frame = [indices[3] for indices in keys_at_frame]
-        pos_dict = {}
-        for position in positions_at_frame:
-            keys_at_tp = [key for key in keys if key[2] == frame and key[3] == position]
-            channels = list(set([key[0] for key in keys_at_tp]))
-            slices = list(set([key[1] for key in keys_at_tp]))
-            pos_dict[position] = (channels, slices)
-        key_tree[frame] = pos_dict
-
-    for i, (channel_index, z_index, time_index, position_index) in enumerate(keys):
-        #store data in chunks of voxels corresponding to a given positon, because this is the largest block
-        #of data that is guaranteed to be hyperrectangular
-        pathinhdf = hdfdatapath(channel_names[channel_index], time_index, position_index) + 'voxels'
-        pix, metadata = magellanwrap.read_tile(channel_index=channel_index, position_index=position_index, z_index=z_index,
-                                     time_index=time_index, return_metadata=True)
-        #check if voxel container already exists, otherwise create it
-        if pathinhdf in file:
-            dataset = file[pathinhdf]
-            z_index_offset = dataset.attrs['z_index_offset']
-            dataset[z_index - z_index_offset, ...] = pix
-        else:
-            # find all slice indices at current position in current channel
-            sliceindices = key_tree[time_index][position_index][1]
-            z_index_offset = min(sliceindices)
-            numslices = np.array(sliceindices).ptp() + 1
-            if numslices == 1:
-                #directory store entire dataset
-                dataset = file.create_dataset(pathinhdf, data=np.reshape(pix, (1, ) + pix.shape), chunks=True,
-                                              compression='lzf')
-            else:
-                #leave room for other slices
-                dataset = file.create_dataset(pathinhdf, shape=(numslices, ) + pix.shape, chunks=True,
-                                          dtype=pix.dtype, compression='lzf')
-                dataset[z_index - z_index_offset, ...] = pix
-            #add metadata for absolute location in z space
-            dataset.attrs['z_index_offset'] = z_index_offset
-        #store per-image metadata
-        dataset.attrs['z{}_metadata'.format(z_index)] = str(metadata)
-        if print_progress:
-            print('{} of {} images processed'.format(i + 1, len(keys)))
-    print(outputname)

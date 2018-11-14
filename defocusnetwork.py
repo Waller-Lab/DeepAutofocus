@@ -6,7 +6,7 @@ import os
 
 class DefocusNetwork:
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None):
@@ -39,7 +39,7 @@ class DefocusNetwork:
 
         #clear everyhting so other instances of this class wont interfere with this one
         tf.reset_default_graph()
-        
+
         if train_mode is not None:
             with tf.Session() as self.sess:
                 if train_mode == 'train':
@@ -79,7 +79,7 @@ class DefocusNetwork:
             print("Evaluating deterministic graph over training set...")
             i = 0
             while True:
-                print('batch {}'.format(i))
+                print('batch {}\r'.format(i),end='')
                 i += 1
                 try:
                     [new_linescans, new_targets] = sess.run([linescan_op, target_op])
@@ -156,7 +156,7 @@ class DefocusNetwork:
                     except tf.errors.OutOfRangeError:
                         break
                 train_log_writer.add_summary(self.sess.run(summary_op), global_step=step)
-                print("Step {}, val loss: {}".format(step, error))
+                print("Step {}, val loss: {}\r".format(step, error),end='')
                 if error < min_validation_error:
                     min_error_path = saver.save(self.sess, self.params['checkpoint_path'] + '/checkpoint',
                                                 global_step=step)
@@ -240,6 +240,7 @@ class DefocusNetwork:
             types = (tf.float32, tf.float32)
             shapes = (tf.TensorShape(self.input_shape), tf.TensorShape([]))
         else: #design mat has already been computed
+            print('Train mode: '  + self.train_mode)
             types = (tf.float32, tf.float32)
             shapes = (tf.TensorShape([self.input_shape]), tf.TensorShape([]))
 
