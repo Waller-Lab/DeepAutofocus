@@ -6,7 +6,7 @@ import os
 
 class DefocusNetwork:
 
-#     os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None):
@@ -227,7 +227,7 @@ class DefocusNetwork:
         return design_mat
 
     def __del__(self):
-        if self.sess is not None:
+        if sess in self:
             self.sess.close()
 
     def _make_dataset(self, repeat, generator_fn):
