@@ -56,8 +56,8 @@ class DefocusNetwork:
                 elif train_mode == 'finetune':
                     #load the normalization values form the old graph          
                     tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
-                    self.mean = loading_session.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const:0'))
-                    self.stddev = loading_session.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const_1:0'))
+                    self.mean = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const:0'))
+                    self.stddev = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const_1:0'))
                     tf.reset_default_graph()
                     predict_input_op, predict_output_op = self._train(load_variables=True)
                     self.predict_input_op = predict_input_op
@@ -240,9 +240,8 @@ class DefocusNetwork:
             types = (tf.float32, tf.float32)
             shapes = (tf.TensorShape(self.input_shape), tf.TensorShape([]))
         else: #design mat has already been computed
-            print('Train mode: '  + self.train_mode)
             types = (tf.float32, tf.float32)
-            shapes = (tf.TensorShape([self.input_shape]), tf.TensorShape([]))
+            shapes = (tf.TensorShape([*self.input_shape]), tf.TensorShape([]))
 
         dataset = tf.data.Dataset.from_generator(generator_fn, types, shapes)
 
