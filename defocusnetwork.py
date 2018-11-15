@@ -6,7 +6,7 @@ import os
 
 class DefocusNetwork:
 
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None):
@@ -36,6 +36,9 @@ class DefocusNetwork:
         self.train_generator = train_generator
         self.val_generator = val_generator
         self.train_mode = train_mode
+        
+        #clear everyhting so other instances of this class wont interfere with this one
+        tf.reset_default_graph()
 
         self.sess = tf.Session()
         if train_mode is not None:
@@ -55,6 +58,7 @@ class DefocusNetwork:
                 tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
                 self.mean = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const:0'))
                 self.stddev = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const_1:0'))
+                tf.reset_default_graph()
                 predict_input_op, predict_output_op = self._train(load_variables=True)
                 self.predict_input_op = predict_input_op
                 self.predict_output_op = predict_output_op
@@ -157,7 +161,8 @@ class DefocusNetwork:
                     except tf.errors.OutOfRangeError:
                         break
                 train_log_writer.add_summary(self.sess.run(summary_op), global_step=step)
-                print("Step {}, val loss: {}\r".format(step, error),end='')
+                print("Step {}, val loss: {}".format(step, error))
+#                 print("Step {}, val loss: {}\r".format(step, error),end='')
                 if error < min_validation_error:
                     min_error_path = saver.save(self.sess, self.params['checkpoint_path'] + '/checkpoint',
                                                 global_step=step)
@@ -166,7 +171,6 @@ class DefocusNetwork:
                 elif step - min_error_step > self.hyper_params['val_overshoot_steps']:
                     break
             step += 1
-            break
             # print(step)
         # saver.restore(self.sess, min_error_path)
         # export saved graph
@@ -226,10 +230,6 @@ class DefocusNetwork:
                 break
         design_mat = np.vstack(design_mat)
         return design_mat
-
-    def __del__(self):
-        if sess in self:
-            self.sess.close()
 
     def _make_dataset(self, repeat, generator_fn):
         """
