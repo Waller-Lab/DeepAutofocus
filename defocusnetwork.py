@@ -9,7 +9,7 @@ class DefocusNetwork:
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     
     def __init__(self, input_shape, train_generator, deterministic_params=None,
-                 val_generator=None, predict_input_shape=None, train_mode=None):
+                 val_generator=None, predict_input_shape=None, train_mode=None, **kwargs):
         """
         Constructor for defocus prediction network. If in 'train mode', go ahead and train the network.
         The network will stop training when error on the validation set has not decreased for (val_overshoot_steps)
@@ -26,6 +26,8 @@ class DefocusNetwork:
                         'val_overshoot_steps': 1000,
                         'num_hidden_units': [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
                         'regularization_strength': 0.0, 'dropout_rate': 0.0, 'input_dropout_rate': 0.6}
+        for key in kwargs.keys():
+            self.hyper_params[key] = kwargs[key]
         # directory paths for logging training, exporting trained model, checkpoints, and loading model
         self.params = {'log_dir': './log', 'export_path': "./exported_model", 'checkpoint_path': './checkpoints',
                        'load_model_path': './exported_model'}
@@ -87,7 +89,7 @@ class DefocusNetwork:
             print('batch {}\r'.format(i),end='')
             i += 1
             try:
-                [new_linescans, new_targets] = self.sess.run([linescan_op, target_op])
+                [new_linescans, new_targets] = self.sess.run([linescan_op, target_op], feed_dict={self.is_train_op: False})
                 if linescans is None:
                     linescans = new_linescans
                     targets = new_targets
@@ -145,7 +147,7 @@ class DefocusNetwork:
         print("Training model...")
         while True:
             # make one training step
-            self.sess.run(train_op)
+            self.sess.run(train_op,feed_dict={self.is_train_op: False})
             # train_log_writer.add_summary(summary, global_step=step)
             # occasionally compute loss over whole validation set
             if step % self.hyper_params['steps_per_validation'] == 0:
@@ -156,8 +158,8 @@ class DefocusNetwork:
                 # go through all validation examples and calculate metric
                 while True:
                     try:
-                        error = self.sess.run(validation_error_op)[
-                            1]  # run both the update op and the running avg and store the latter
+                        # run both the update op and the running avg and store the latter
+                        error = self.sess.run(validation_error_op, feed_dict={self.is_train_op: False})[1]
                     except tf.errors.OutOfRangeError:
                         break
                 train_log_writer.add_summary(self.sess.run(summary_op), global_step=step)
@@ -193,7 +195,8 @@ class DefocusNetwork:
         prediction = np.array([])
         target = np.array([])
         for input in generator_fn():
-            pred_new = self.sess.run(self.predict_output_op, {self.predict_input_op: np.reshape(input[0], [1,-1])})
+            pred_new = self.sess.run(self.predict_output_op,
+                        {self.predict_input_op: np.reshape(input[0], [1,-1]), self.is_train_op: False })
             prediction = np.concatenate((prediction, pred_new))
             target = np.concatenate((target, np.array([input[1]])))
 
@@ -267,49 +270,6 @@ class DefocusNetwork:
     def _build_deterministic_graph(self, input_tensor):
         print('Building deterministic graph...')
 
-        def fft_shift(matrix):
-            with tf.name_scope("fft_shift"):
-                height, width = [x.value for x in matrix.get_shape()[1:]]
-                top_left = matrix[:, :height // 2, :width // 2]
-                top_right = matrix[:, :height // 2, width // 2:]
-                bottom_left = matrix[:, height // 2:, :width // 2]
-                bottom_right = matrix[:, height // 2:, width // 2:]
-                shifted = tf.concat(
-                    [tf.concat([bottom_right, bottom_left], axis=2), tf.concat([top_right, top_left], axis=2)],
-                    axis=1)
-                return shifted
-
-        def interp_line(matrix):
-            with tf.name_scope("line_project"):
-                height, width = [x.value for x in matrix.get_shape()[1:]]
-                # interpolate along autofocus axis
-                length = int(height)  # a fraction of the total dimension of the image
-                center = np.array([height / 2, width / 2])
-                interp_coords = np.vstack(
-                    (center[0] + np.sin(self.deterministic_params['autofocus_angle']) * np.arange(-length / 2, length / 2),
-                     center[1] + np.cos(self.deterministic_params['autofocus_angle']) * np.arange(-length / 2, length / 2))).T
-
-                def interp_pixel(image, yx):
-                    bottom_index = int(yx[0] // 1)
-                    top_index = int(yx[0] // 1 + 1)
-                    left_index = int(yx[1] // 1)
-                    right_index = int(yx[1] // 1 + 1)
-                    top_weight = yx[0] - bottom_index
-                    bottom_weight = 1 - top_weight
-                    right_weight = yx[1] - left_index
-                    left_weight = 1 - right_weight
-                    return (bottom_weight * (
-                        left_weight * image[..., bottom_index, left_index] + right_weight * image[
-                            ..., bottom_index, right_index])
-                            + top_weight * (
-                                left_weight * image[..., top_index, left_index] + right_weight * image[
-                                    ..., top_index, right_index]))
-
-                interped = []
-                for i, yx in enumerate(interp_coords):
-                    interped.append(interp_pixel(matrix, yx))
-                return tf.stack(interped, axis=1)
-
         with tf.name_scope("deterministic"):
             # later might want: tf.image.central_crop
             # for now, add together all images
@@ -328,7 +288,10 @@ class DefocusNetwork:
 
             #take magnitude of top quadrant of FT as feature vec
             ft = tf.fft2d(tf.cast(incoherent_sum, tf.complex64))
-            ft_mag = tf.abs(ft)
+            if self.deterministic_params['architecture'] == 'keep_real':
+                ft_mag = tf.real(ft)
+            else:
+                ft_mag = tf.abs(ft)
             #take low frequency part of fourier spectrum that encompasses the direction of th LED axis
             dim = ft_mag.get_shape()[1].value
             led_width_pix = int(self.deterministic_params['led_width'] * dim) //2
@@ -352,6 +315,7 @@ class DefocusNetwork:
             input_data = self._build_deterministic_graph(input_data)
         print("Building trainable graph...")
         with tf.name_scope("{}_network".format(graph_mode)):
+            self.is_train_op=tf.placeholder(tf.bool, name="is_train")
             #Add all LED images together
             if type(input_data) is dict:
                 input_tensor = None
@@ -374,6 +338,7 @@ class DefocusNetwork:
             for num_hidden in self.hyper_params['num_hidden_units']:
                 current_layer = tf.layers.dense(inputs=current_layer, units=num_hidden, activation=tf.nn.relu, name='hidden{}'.format(index),
                                          reuse=tf.AUTO_REUSE, kernel_regularizer=regularizer)
+                current_layer = tf.layers.batch_normalization(inputs=current_layer, training=self.is_train_op, reuse=tf.AUTO_REUSE)
                 current_layer = tf.layers.dropout(current_layer, training=graph_mode == 'training', rate=self.hyper_params['dropout_rate'])
                 index += 1
             output = tf.layers.dense(inputs=current_layer, units=1, activation=None, name='output_weights', reuse=tf.AUTO_REUSE, kernel_regularizer=regularizer)
@@ -400,8 +365,11 @@ class DefocusNetwork:
                             total_reg_loss = tf.add_n(reg_losses)
                         total_loss = total_reg_loss + loss
                 with tf.name_scope("optimizer"):
-                    train_step = tf.train.AdamOptimizer(self.hyper_params['learning_rate']).minimize(total_loss, global_step=tf.train.get_global_step())
-                    # train_step = tf.train.GradientDescentOptimizer(self.hyper_params['learning_rate']).minimize(loss, global_step=tf.train.get_global_step())
+                    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                    with tf.control_dependencies(update_ops):
+                        # Ensures that we execute the update_ops before performing the train_step
+                        train_step = tf.train.AdamOptimizer(self.hyper_params['learning_rate']).minimize(total_loss, global_step=tf.train.get_global_step())
+                        # train_step = tf.train.GradientDescentOptimizer(self.hyper_params['learning_rate']).minimize(loss, global_step=tf.train.get_global_step())
                 return train_step
             elif graph_mode == 'analyze': #for plotting error vs defocus distance
                 with tf.name_scope("analysis_metrics"):

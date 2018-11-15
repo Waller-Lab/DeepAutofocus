@@ -294,9 +294,9 @@ def plot_results(pred, target, draw_rect=False):
                                                angle=-45, color=[1, 0, 0, 0.2]))
         plt.plot([min_target, max_target], [min_target, max_target], 'r-')
 
-#functions for calcuating the NA of an LED on the quasi-dome based on it's index for the quasi-dome illuminator
 def cartToNa(point_list_cart, z_offset=8):
-    """Function which converts a list of cartesian points to numerical aperture (NA)
+    """functions for calcuating the NA of an LED on the quasi-dome based on it's index for the quasi-dome illuminator
+    converts a list of cartesian points to numerical aperture (NA)
 
     Args:
         point_list_cart: List of (x,y,z) positions relative to the sample (origin)
@@ -344,8 +344,7 @@ def get_led_na(led_index):
     angles_xy = np.arcsin(np.abs(source_list_na))
     angle = np.arctan(np.sqrt(np.tan(angles_xy[:, 0])**2 + np.tan(angles_xy[:, 1])**2 ))
     return np.sin(angle[led_index - 1])
-        
-        
+
 class MagellanWithAnnotation(MagellanDataset):
     """
     This class takes the python wrapper for a Micro-Magellan dataset, and adds in the ability to store annoations in an
@@ -393,7 +392,6 @@ class MagellanWithAnnotation(MagellanDataset):
             return np.copy(self.file[name])
         return None
 
-    
 class HDFDataWrapper:
     """
     Version that reads the deprecated magellan hdf files
