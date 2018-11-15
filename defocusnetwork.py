@@ -6,7 +6,7 @@ import os
 
 class DefocusNetwork:
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None):
@@ -37,31 +37,33 @@ class DefocusNetwork:
         self.val_generator = val_generator
         self.train_mode = train_mode
 
-        #clear everyhting so other instances of this class wont interfere with this one
-        tf.reset_default_graph()
-
+        self.sess = tf.Session()
         if train_mode is not None:
-            with tf.Session() as self.sess:
-                if train_mode == 'train':
-                    #not using deterministic front end, but rather trainable backend
-                    self._compute_normalizations(self.train_generator)
-                    predict_input_op, predict_output_op = self._train()
-                    self.predict_input_op = predict_input_op
-                    self.predict_output_op = predict_output_op
-                elif train_mode == 'load':
-                    #load full saved model instead of training
-                    tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
-                    self.predict_input_op = tf.get_default_graph().get_tensor_by_name('deterministic/Log:0')
-                    self.predict_output_op = tf.get_default_graph().get_tensor_by_name('predict_network/output:0')
-                elif train_mode == 'finetune':
-                    #load the normalization values form the old graph          
-                    tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
-                    self.mean = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const:0'))
-                    self.stddev = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const_1:0'))
-                    tf.reset_default_graph()
-                    predict_input_op, predict_output_op = self._train(load_variables=True)
-                    self.predict_input_op = predict_input_op
-                    self.predict_output_op = predict_output_op
+            if train_mode == 'train':
+                #not using deterministic front end, but rather trainable backend
+                self._compute_normalizations(self.train_generator)
+                predict_input_op, predict_output_op = self._train()
+                self.predict_input_op = predict_input_op
+                self.predict_output_op = predict_output_op
+            elif train_mode == 'load':
+                #load full saved model instead of training
+                tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
+                self.predict_input_op = tf.get_default_graph().get_tensor_by_name('deterministic/Log:0')
+                self.predict_output_op = tf.get_default_graph().get_tensor_by_name('predict_network/output:0')
+            elif train_mode == 'finetune':
+                #load the normalization values form the old graph
+                tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
+                self.mean = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const:0'))
+                self.stddev = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const_1:0'))
+                predict_input_op, predict_output_op = self._train(load_variables=True)
+                self.predict_input_op = predict_input_op
+                self.predict_output_op = predict_output_op
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.sess.close()
 
     def evaluate_deterministic_graph(self):
         """
@@ -69,28 +71,27 @@ class DefocusNetwork:
         Used either for precomputing deterministic part of graph or for calculating training normalizations
         :return:
         """
-        with tf.Session() as sess:
-            # iterate over entire dataset to comput normalizations
-            normalization_dataset = self._make_dataset(repeat=False, generator_fn=self.train_generator)
-            input_data_op, target_op, _ = self._build_input_pipeline('training', dataset=normalization_dataset)
-            linescan_op = self._build_deterministic_graph(input_data_op)
-            linescans = None
-            targets = None
-            print("Evaluating deterministic graph over training set...")
-            i = 0
-            while True:
-                print('batch {}\r'.format(i),end='')
-                i += 1
-                try:
-                    [new_linescans, new_targets] = sess.run([linescan_op, target_op])
-                    if linescans is None:
-                        linescans = new_linescans
-                        targets = new_targets
-                    else:
-                        linescans = np.vstack((linescans, new_linescans))
-                        targets = np.hstack((targets, new_targets))
-                except tf.errors.OutOfRangeError:
-                    break
+        # iterate over entire dataset to comput normalizations
+        normalization_dataset = self._make_dataset(repeat=False, generator_fn=self.train_generator)
+        input_data_op, target_op, _ = self._build_input_pipeline('training', dataset=normalization_dataset)
+        linescan_op = self._build_deterministic_graph(input_data_op)
+        linescans = None
+        targets = None
+        print("Evaluating deterministic graph over training set...")
+        i = 0
+        while True:
+            print('batch {}\r'.format(i),end='')
+            i += 1
+            try:
+                [new_linescans, new_targets] = self.sess.run([linescan_op, target_op])
+                if linescans is None:
+                    linescans = new_linescans
+                    targets = new_targets
+                else:
+                    linescans = np.vstack((linescans, new_linescans))
+                    targets = np.hstack((targets, new_targets))
+            except tf.errors.OutOfRangeError:
+                break
 
         return linescans, targets.T  # return n x p and n x 1
 
@@ -126,7 +127,7 @@ class DefocusNetwork:
         # initialize all variables in the graph
         if load_variables:
             saver = tf.train.Saver()
-            saver.restore(self.sess , self.params['load_model_path'] + '/variables/variables')
+            saver.restore(self.sess, self.params['load_model_path'] + '/variables/variables')
         else:
             init_op = tf.global_variables_initializer()
             self.sess.run(init_op)
@@ -165,6 +166,7 @@ class DefocusNetwork:
                 elif step - min_error_step > self.hyper_params['val_overshoot_steps']:
                     break
             step += 1
+            break
             # print(step)
         # saver.restore(self.sess, min_error_path)
         # export saved graph
@@ -186,13 +188,12 @@ class DefocusNetwork:
         """
         prediction = np.array([])
         target = np.array([])
-        with tf.Session() as self.sess:
-            for input in generator_fn():
-                pred_new = self.sess.run(self.predict_output_op, {self.predict_input_op: np.reshape(input[0],[1,-1])})
-                prediction = np.concatenate((prediction, pred_new))
-                target = np.concatenate((target, np.array([input[1]])))
+        for input in generator_fn():
+            pred_new = self.sess.run(self.predict_output_op, {self.predict_input_op: np.reshape(input[0], [1,-1])})
+            prediction = np.concatenate((prediction, pred_new))
+            target = np.concatenate((target, np.array([input[1]])))
 
-            pred_consensus, target_consensus = self._combine_predictions(prediction,target)
+        pred_consensus, target_consensus = self._combine_predictions(prediction,target)
         return pred_consensus, target_consensus
     
     def _combine_predictions(self, pred, target):

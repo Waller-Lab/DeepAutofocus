@@ -10,6 +10,7 @@ from pygellan import MagellanDataset
 import h5py
 import os
 from magellanhdf import MagellanHDFContainer
+import json
 
 
 def get_patch_metadata(image_size, split_k):
@@ -121,7 +122,7 @@ def generator_fn(data_wrapper_list, focal_planes, tile_split_k, position_indices
                 if z_index == 0 and ignore_first_slice:
                     continue
                 dataset_slice_pos_tuples.append((data_wrapper, z_index, pos_index))
-    print('{} sliceposition tuples\r'.format(len(dataset_slice_pos_tuples)),end='')
+    print('{} sliceposition tuples'.format(len(dataset_slice_pos_tuples)),end='')
     indices = np.arange(len(dataset_slice_pos_tuples))
 
     def inner_generator(indices, focal_planes):
@@ -209,8 +210,8 @@ def read_or_calc_focal_planes(data_wrapper, split_k, n_cores=1, show_output=Fals
             for crop_index in focal_plane.keys():
                 data_wrapper.store_focal_plane(get_name(pos_index), focal_plane[crop_index])
         else:
-            print('Reading precomputed focal plane pos index {} of {}\r'.format(pos_index, 
-                                                                     data_wrapper.get_num_xy_positions()),end='')
+            print('Reading precomputed focal plane pos index {} of {}\r'.format(pos_index + 1,
+                                                                     data_wrapper.get_num_xy_positions()), end='')
             #read saved value from previous computation
             focal_plane = {}
             for crop_index in range(split_k**2):
@@ -250,9 +251,9 @@ def read_or_calc_design_mat(data_wrapper, position_indices, focal_planes, determ
         generator = generator_fn([data_wrapper], focal_planes, tile_split_k=deterministic_params['tile_split_k'],
                              position_indices_list=[position_indices], ignore_first_slice=True)
         #Use the deterministic part of the network only to compute design matrix
-        network = DefocusNetwork(input_shape=(patch_size, patch_size), train_generator=generator,
-                                     deterministic_params=deterministic_params)
-        features, defocus_dists = network.evaluate_deterministic_graph()
+        with DefocusNetwork(input_shape=(patch_size, patch_size), train_generator=generator,
+                                     deterministic_params=deterministic_params) as network:
+            features, defocus_dists = network.evaluate_deterministic_graph()
         data_wrapper.store_array(feature_name, features)
         data_wrapper.store_array(defocus_name, defocus_dists)
     return features, defocus_dists
