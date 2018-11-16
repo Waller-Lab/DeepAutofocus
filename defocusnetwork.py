@@ -6,7 +6,7 @@ import os
 
 class DefocusNetwork:
 
-#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None, **kwargs):
@@ -291,26 +291,31 @@ class DefocusNetwork:
 
             #take magnitude of top quadrant of FT as feature vec
             ft = tf.fft2d(tf.cast(incoherent_sum, tf.complex64))
-            if 'architecture' in self.deterministic_params.keys() and self.deterministic_params['architecture'] == 'keep_real':
-                ft_mag = tf.real(ft)
-            else:
-                ft_mag = tf.abs(ft)
-            #take low frequency part of fourier spectrum that encompasses the direction of th LED axis
-            dim = ft_mag.get_shape()[1].value
-            led_width_pix = int(self.deterministic_params['led_width'] * dim) //2
+            # take low frequency part of fourier spectrum that encompasses the direction of th LED axis
+            dim = ft.get_shape()[1].value
+            led_width_pix = int(self.deterministic_params['led_width'] * dim) // 2
             # divide this by two to exclude duplicatte information
             non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim)
-            features = tf.concat(
-                [tf.layers.flatten(ft_mag[:, :led_width_pix, :non_led_width_pix]),
-                 tf.layers.flatten(ft_mag[:, -led_width_pix:, :non_led_width_pix])],
-                axis=1)
-
-
-            #l2 normalize
-            normalized = features / tf.expand_dims(tf.norm(features, axis=1), axis=1)
-            #log transform--make sure its always a positive number
-            normalized = tf.log(normalized + np.finfo(np.float32).eps)
-            return normalized
+            if 'architecture' in self.deterministic_params.keys() and self.deterministic_params['architecture'] == 'keep_it_real':
+                ft_real = tf.real(ft)
+                features = tf.concat([tf.layers.flatten(ft_real[:, :led_width_pix, :non_led_width_pix]),
+                                      tf.layers.flatten(ft_real[:, -led_width_pix:, :non_led_width_pix])], axis=1)
+                # l2 normalize
+                normalized = features / tf.expand_dims(tf.norm(features, axis=1), axis=1)
+                # Do equivalent of log transform
+                normalized_abs = tf.abs(normalized)
+                rescale = tf.log(normalized_abs + np.finfo(np.float32).eps) / normalized_abs
+                normalized * rescale
+                return normalized
+            else:
+                ft_mag = tf.abs(ft)
+                features = tf.concat([tf.layers.flatten(ft_mag[:, :led_width_pix, :non_led_width_pix]),
+                                      tf.layers.flatten(ft_mag[:, -led_width_pix:, :non_led_width_pix])], axis=1)
+                #l2 normalize
+                normalized = features / tf.expand_dims(tf.norm(features, axis=1), axis=1)
+                #log transform--make sure its always a positive number
+                normalized = tf.log(normalized + np.finfo(np.float32).eps)
+                return normalized
 
     def _build_graph(self, graph_mode, dataset=None):
         input_data, target, validation_iterator_init_op = self._build_input_pipeline(graph_mode=graph_mode, dataset=dataset)

@@ -279,6 +279,8 @@ def compile_deterministic_data(data_wrapper_list, postion_indices_list, focal_pl
     #pool all data together
     targets = np.concatenate(targets)
     features = np.concatenate(features)
+    if np.any(np.isnan(features)):
+        raise Exception('NAN detected in deterministic data')
     return features, targets
 
 def plot_results(pred, target, draw_rect=False):
@@ -286,7 +288,6 @@ def plot_results(pred, target, draw_rect=False):
     indices = np.arange(pred.shape[0])
     np.random.shuffle(indices)
     plt.plot(target[indices[:1500]], pred[indices[:1500]], '.')
-    plt.plot(target, pred, '.')
     plt.xlabel('Target defocus (um)')
     plt.ylabel('Predicted defocus (um)')
     if draw_rect:
