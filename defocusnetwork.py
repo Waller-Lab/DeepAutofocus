@@ -22,8 +22,8 @@ class DefocusNetwork:
         """
 
         # hyperparameters for the trainable part of the network
-        self.hyper_params = {'batch_size': 25, 'learning_rate': 2e-5, 'steps_per_validation': 25,
-                        'val_overshoot_steps': 3000,
+        self.hyper_params = {'batch_size': 25, 'learning_rate': 1e-4, 'steps_per_validation': 25,
+                        'val_overshoot_steps': 300,
                         'num_hidden_units': [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
                         'regularization_strength': 0.0, 'dropout_rate': 0.0, 'input_dropout_rate': 0.6}
         for key in kwargs.keys():
@@ -111,7 +111,6 @@ class DefocusNetwork:
         train_dataset = self._make_dataset(repeat=True, generator_fn=self.train_generator)
         val_dataset = self._make_dataset(repeat=False, generator_fn=self.val_generator)
         # build seperate graphs because they each have different input Datasets
-        self.is_train_op = tf.placeholder(tf.bool, name="is_train")
         train_op = self._build_graph(graph_mode='training', dataset=train_dataset)
         validation_error_op, validation_error_init_op = self._build_graph(graph_mode='evaluate', dataset=val_dataset)
         predict_input_tensor, predict_output_tensor = self._build_graph(graph_mode='predict')
@@ -148,7 +147,7 @@ class DefocusNetwork:
         print("Training model...")
         while True:
             # make one training step
-            self.sess.run(train_op,feed_dict={self.is_train_op: True})
+            self.sess.run(train_op)
             # train_log_writer.add_summary(summary, global_step=step)
             # occasionally compute loss over whole validation set
             if step % self.hyper_params['steps_per_validation'] == 0:
@@ -160,7 +159,7 @@ class DefocusNetwork:
                 while True:
                     try:
                         # run both the update op and the running avg and store the latter
-                        error = self.sess.run(validation_error_op, feed_dict={self.is_train_op: False})[1]
+                        error = self.sess.run(validation_error_op)[1]
                     except tf.errors.OutOfRangeError:
                         break
                 train_log_writer.add_summary(self.sess.run(summary_op), global_step=step)
@@ -196,8 +195,7 @@ class DefocusNetwork:
         prediction = np.array([])
         target = np.array([])
         for input in generator_fn():
-            pred_new = self.sess.run(self.predict_output_op, feed_dict=
-                        {self.predict_input_op: np.reshape(input[0], [1,-1]), 'is_train:0': False })
+            pred_new = self.sess.run(self.predict_output_op, feed_dict= {self.predict_input_op: np.reshape(input[0], [1,-1])})
             prediction = np.concatenate((prediction, pred_new))
             target = np.concatenate((target, np.array([input[1]])))
 
@@ -341,9 +339,10 @@ class DefocusNetwork:
             current_layer = normalized_input
             index = 0
             for num_hidden in self.hyper_params['num_hidden_units']:
-                current_layer = tf.layers.dense(inputs=current_layer, units=num_hidden, activation=tf.nn.relu, name='hidden{}'.format(index),
-                                         reuse=tf.AUTO_REUSE, kernel_regularizer=regularizer)
-                current_layer = tf.layers.batch_normalization(inputs=current_layer, training=self.is_train_op, reuse=tf.AUTO_REUSE)
+                current_layer = tf.layers.dense(inputs=current_layer, units=num_hidden, activation=tf.nn.relu,
+                                name='hidden{}'.format(index), reuse=tf.AUTO_REUSE, kernel_regularizer=regularizer)
+                current_layer = tf.layers.batch_normalization(inputs=current_layer, name='hidden{}_batchnorm'.format(index),
+                                              training=graph_mode == 'training', reuse=tf.AUTO_REUSE)
                 current_layer = tf.layers.dropout(current_layer, training=graph_mode == 'training', rate=self.hyper_params['dropout_rate'])
                 index += 1
             output = tf.layers.dense(inputs=current_layer, units=1, activation=None, name='output_weights', reuse=tf.AUTO_REUSE, kernel_regularizer=regularizer)
