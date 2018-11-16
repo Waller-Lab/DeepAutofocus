@@ -282,6 +282,10 @@ def compile_deterministic_data(data_wrapper_list, postion_indices_list, focal_pl
     return features, targets
 
 def plot_results(pred, target, draw_rect=False):
+    #don't plot too many points
+    indices = np.arange(pred.shape[0])
+    np.random.shuffle(indices)
+    plt.plot(target[indices[:1500]], pred[indices[:1500]], '.')
     plt.plot(target, pred, '.')
     plt.xlabel('Target defocus (um)')
     plt.ylabel('Predicted defocus (um)')
