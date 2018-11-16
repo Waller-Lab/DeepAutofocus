@@ -25,15 +25,16 @@ class DefocusNetwork:
         self.hyper_params = {'batch_size': 25, 'learning_rate': 1e-4, 'steps_per_validation': 25,
                         'val_overshoot_steps': 2000,
                         'num_hidden_units': [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
-                        'regularization_strength': 0.0, 'dropout_rate': 0.0, 'input_dropout_rate': 0.6}
+                        'regularization_strength': 0.0, 'dropout_rate': 0.0, 'input_dropout_rate': 0.6,
+                        'total_steps': 10000000000000}
         for key in kwargs.keys():
-            if key in self.hyper_params.keys()
+            if key in self.hyper_params.keys():
                 self.hyper_params[key] = kwargs[key]
         # directory paths for logging training, exporting trained model, checkpoints, and loading model
         self.params = {'log_dir': './log', 'export_path': "./exported_model", 'checkpoint_path': './checkpoints',
                        'load_model_path': './exported_model'}
         for key in kwargs.keys():
-            if key in self.params.keys()
+            if key in self.params.keys():
                 self.params[key] = kwargs[key]
         self.deterministic_params = deterministic_params
 
@@ -177,6 +178,8 @@ class DefocusNetwork:
                 elif step - min_error_step > self.hyper_params['val_overshoot_steps']:
                     break
             step += 1
+            if 'total_steps' in self.hyper_params.keys() and step > self.hyper_params['total_steps']:
+                break
             # print(step)
         # saver.restore(self.sess, min_error_path)
         # export saved graph
