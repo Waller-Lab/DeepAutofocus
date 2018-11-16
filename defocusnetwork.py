@@ -306,9 +306,9 @@ class DefocusNetwork:
                 # l2 normalize
                 normalized = features / tf.expand_dims(tf.norm(features, axis=1), axis=1)
                 # Do equivalent of log transform
-                normalized_abs = tf.abs(normalized)
-                rescale = tf.log(normalized_abs + np.finfo(np.float32).eps) / normalized_abs
-                normalized * rescale
+#                 normalized_abs = tf.abs(normalized)
+#                 rescale = tf.log(normalized_abs + np.finfo(np.float32).eps) / normalized_abs
+#                 normalized * rescale
                 return normalized
             else:
                 ft_mag = tf.abs(ft)
@@ -317,7 +317,7 @@ class DefocusNetwork:
                 #l2 normalize
                 normalized = features / tf.expand_dims(tf.norm(features, axis=1), axis=1)
                 #log transform--make sure its always a positive number
-                normalized = tf.log(normalized + np.finfo(np.float32).eps)
+#                 normalized = tf.log(normalized + np.finfo(np.float32).eps)
                 return normalized
 
     def _build_graph(self, graph_mode, dataset=None):
@@ -348,8 +348,8 @@ class DefocusNetwork:
             for num_hidden in self.hyper_params['num_hidden_units']:
                 current_layer = tf.layers.dense(inputs=current_layer, units=num_hidden, activation=tf.nn.relu,
                                 name='hidden{}'.format(index), reuse=tf.AUTO_REUSE, kernel_regularizer=regularizer)
-                current_layer = tf.layers.batch_normalization(inputs=current_layer, name='hidden{}_batchnorm'.format(index),
-                                              training=graph_mode == 'training', reuse=tf.AUTO_REUSE)
+#                 current_layer = tf.layers.batch_normalization(inputs=current_layer, name='hidden{}_batchnorm'.format(index),
+#                                               training=graph_mode == 'training', reuse=tf.AUTO_REUSE)
                 current_layer = tf.layers.dropout(current_layer, training=graph_mode == 'training', rate=self.hyper_params['dropout_rate'])
                 index += 1
             output = tf.layers.dense(inputs=current_layer, units=1, activation=None, name='output_weights', reuse=tf.AUTO_REUSE, kernel_regularizer=regularizer)
@@ -367,7 +367,7 @@ class DefocusNetwork:
             elif graph_mode == 'training':
                 with tf.name_scope("loss_function"):
                     loss = tf.losses.mean_squared_error(target, predictions)
-                    loss = tf.sqrt(loss)
+#                     loss = tf.sqrt(loss)
                     if self.hyper_params['regularization_strength'] == 0:
                         total_loss = loss
                     else:
@@ -376,10 +376,10 @@ class DefocusNetwork:
                             total_reg_loss = tf.add_n(reg_losses)
                         total_loss = total_reg_loss + loss
                 with tf.name_scope("optimizer"):
-                    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                    with tf.control_dependencies(update_ops):
-                        # Ensures that we execute the update_ops before performing the train_step
-                        train_step = tf.train.AdamOptimizer(self.hyper_params['learning_rate']).minimize(total_loss, global_step=tf.train.get_global_step())
+#                     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+#                     with tf.control_dependencies(update_ops):
+#                         # Ensures that we execute the update_ops before performing the train_step
+                    train_step = tf.train.AdamOptimizer(self.hyper_params['learning_rate']).minimize(total_loss, global_step=tf.train.get_global_step())
                         # train_step = tf.train.GradientDescentOptimizer(self.hyper_params['learning_rate']).minimize(loss, global_step=tf.train.get_global_step())
                 return train_step
             elif graph_mode == 'analyze': #for plotting error vs defocus distance
