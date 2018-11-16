@@ -6,7 +6,7 @@ import os
 
 class DefocusNetwork:
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None, **kwargs):
@@ -23,7 +23,7 @@ class DefocusNetwork:
 
         # hyperparameters for the trainable part of the network
         self.hyper_params = {'batch_size': 25, 'learning_rate': 2e-5, 'steps_per_validation': 25,
-                        'val_overshoot_steps': 1000,
+                        'val_overshoot_steps': 3000,
                         'num_hidden_units': [100, 100, 100, 100, 100, 100, 100, 100, 100, 100],
                         'regularization_strength': 0.0, 'dropout_rate': 0.0, 'input_dropout_rate': 0.6}
         for key in kwargs.keys():
@@ -89,7 +89,7 @@ class DefocusNetwork:
             print('batch {}\r'.format(i),end='')
             i += 1
             try:
-                [new_linescans, new_targets] = self.sess.run([linescan_op, target_op], feed_dict={self.is_train_op: False})
+                [new_linescans, new_targets] = self.sess.run([linescan_op, target_op])
                 if linescans is None:
                     linescans = new_linescans
                     targets = new_targets
@@ -147,7 +147,7 @@ class DefocusNetwork:
         print("Training model...")
         while True:
             # make one training step
-            self.sess.run(train_op,feed_dict={self.is_train_op: False})
+            self.sess.run(train_op,feed_dict={'is_train:0': True})
             # train_log_writer.add_summary(summary, global_step=step)
             # occasionally compute loss over whole validation set
             if step % self.hyper_params['steps_per_validation'] == 0:
@@ -159,7 +159,7 @@ class DefocusNetwork:
                 while True:
                     try:
                         # run both the update op and the running avg and store the latter
-                        error = self.sess.run(validation_error_op, feed_dict={self.is_train_op: False})[1]
+                        error = self.sess.run(validation_error_op, feed_dict={'is_train:0': True})[1]
                     except tf.errors.OutOfRangeError:
                         break
                 train_log_writer.add_summary(self.sess.run(summary_op), global_step=step)
@@ -195,8 +195,8 @@ class DefocusNetwork:
         prediction = np.array([])
         target = np.array([])
         for input in generator_fn():
-            pred_new = self.sess.run(self.predict_output_op,
-                        {self.predict_input_op: np.reshape(input[0], [1,-1]), self.is_train_op: False })
+            pred_new = self.sess.run(self.predict_output_op, feed_dict=
+                        {self.predict_input_op: np.reshape(input[0], [1,-1]), 'is_train:0': False })
             prediction = np.concatenate((prediction, pred_new))
             target = np.concatenate((target, np.array([input[1]])))
 
@@ -288,7 +288,7 @@ class DefocusNetwork:
 
             #take magnitude of top quadrant of FT as feature vec
             ft = tf.fft2d(tf.cast(incoherent_sum, tf.complex64))
-            if self.deterministic_params['architecture'] == 'keep_real':
+            if 'architecture' in self.deterministic_params and self.deterministic_params['architecture'] == 'keep_real':
                 ft_mag = tf.real(ft)
             else:
                 ft_mag = tf.abs(ft)
@@ -314,8 +314,8 @@ class DefocusNetwork:
         if graph_mode == 'predict':
             input_data = self._build_deterministic_graph(input_data)
         print("Building trainable graph...")
+        self.is_train_op=tf.placeholder(tf.bool, name="is_train")
         with tf.name_scope("{}_network".format(graph_mode)):
-            self.is_train_op=tf.placeholder(tf.bool, name="is_train")
             #Add all LED images together
             if type(input_data) is dict:
                 input_tensor = None
