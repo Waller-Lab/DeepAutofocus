@@ -111,6 +111,7 @@ class DefocusNetwork:
         train_dataset = self._make_dataset(repeat=True, generator_fn=self.train_generator)
         val_dataset = self._make_dataset(repeat=False, generator_fn=self.val_generator)
         # build seperate graphs because they each have different input Datasets
+        self.is_train_op = tf.placeholder(tf.bool, name="is_train")
         train_op = self._build_graph(graph_mode='training', dataset=train_dataset)
         validation_error_op, validation_error_init_op = self._build_graph(graph_mode='evaluate', dataset=val_dataset)
         predict_input_tensor, predict_output_tensor = self._build_graph(graph_mode='predict')
@@ -147,7 +148,7 @@ class DefocusNetwork:
         print("Training model...")
         while True:
             # make one training step
-            self.sess.run(train_op,feed_dict={'is_train:0': True})
+            self.sess.run(train_op,feed_dict={self.is_train_op: True})
             # train_log_writer.add_summary(summary, global_step=step)
             # occasionally compute loss over whole validation set
             if step % self.hyper_params['steps_per_validation'] == 0:
@@ -159,7 +160,7 @@ class DefocusNetwork:
                 while True:
                     try:
                         # run both the update op and the running avg and store the latter
-                        error = self.sess.run(validation_error_op, feed_dict={'is_train:0': True})[1]
+                        error = self.sess.run(validation_error_op, feed_dict={self.is_train_op: False})[1]
                     except tf.errors.OutOfRangeError:
                         break
                 train_log_writer.add_summary(self.sess.run(summary_op), global_step=step)
@@ -288,7 +289,7 @@ class DefocusNetwork:
 
             #take magnitude of top quadrant of FT as feature vec
             ft = tf.fft2d(tf.cast(incoherent_sum, tf.complex64))
-            if 'architecture' in self.deterministic_params and self.deterministic_params['architecture'] == 'keep_real':
+            if 'architecture' in self.deterministic_params.keys() and self.deterministic_params['architecture'] == 'keep_real':
                 ft_mag = tf.real(ft)
             else:
                 ft_mag = tf.abs(ft)
@@ -314,7 +315,6 @@ class DefocusNetwork:
         if graph_mode == 'predict':
             input_data = self._build_deterministic_graph(input_data)
         print("Building trainable graph...")
-        self.is_train_op=tf.placeholder(tf.bool, name="is_train")
         with tf.name_scope("{}_network".format(graph_mode)):
             #Add all LED images together
             if type(input_data) is dict:
