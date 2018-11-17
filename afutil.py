@@ -168,8 +168,8 @@ def feature_vector_generator_fn(feature_vectors, defocus_dists, mode, split_k, t
         np.random.seed(123)
         np.random.shuffle(data_indices)
     #not sure if this is absolutely needed but just in case...
-    feature_vectors = np.copy(feature_vectors)
-    defocus_dists = np.copy(defocus_dists)
+    # feature_vectors = np.copy(feature_vectors)
+    # defocus_dists = np.copy(defocus_dists)
     def inner_generator(linescans, defocus_dists, indices):
         #yield data in a shuffled order
         for index in indices:
@@ -391,10 +391,10 @@ class MagellanWithAnnotation(MagellanDataset):
 
     def read_array(self, name):
         """
-        Return a RAM copy of previously stored numoy array
+        Return previously stored numoy array
         """
         if name in self.file:
-            return np.copy(self.file[name])
+            return self.file[name]
         return None
 
 class HDFDataWrapper:

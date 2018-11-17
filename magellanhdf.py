@@ -98,10 +98,10 @@ class MagellanHDFContainer:
 
     def read_array(self, name):
         """
-        Return a RAM copy of previously stored numoy array
+        Return numpy array on disk
         """
         if name in self.file:
-            return np.copy(self.file[name])
+            return self.file[name]
         return None
 
     #Store array data specific to a given tile
