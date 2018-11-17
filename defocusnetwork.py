@@ -76,6 +76,18 @@ class DefocusNetwork:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.sess.close()
 
+    def compute_saliency_map(self, generator_fn):
+        gradient_op = tf.get_default_graph().get_tensor_by_name('name_of_thing')
+        gradients = []
+        targets = []
+        for input in generator_fn():
+            gradients.append(self.sess.run(gradient_op, feed_dict={self.predict_input_op: np.reshape(input[0], [1, -1])}))
+            targets.append(input[0])
+
+        #TODO: unreshape them, average over all examples?
+        #TODO: maybe also average all input images?
+
+
     def evaluate_deterministic_graph(self):
         """
         evaluate deterministic graph over training data
@@ -356,6 +368,8 @@ class DefocusNetwork:
             output = tf.layers.dropout(output, training=graph_mode == 'training', rate=self.hyper_params['dropout_rate'])
 
             predictions = tf.squeeze(output, axis=1, name="output")
+            #for calculating saliency map
+            tf.gradients(predictions, input_data, name="prediction_feature_gradient")
             if graph_mode == 'predict':
                 return input_tensor, predictions
             if graph_mode == 'evaluate':
