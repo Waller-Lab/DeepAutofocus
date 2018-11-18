@@ -7,7 +7,7 @@ import os
 class DefocusNetwork:
 
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    
+
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None, **kwargs):
         """
@@ -76,17 +76,24 @@ class DefocusNetwork:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.sess.close()
 
-    def compute_saliency_map(self, generator_fn):
-        gradient_op = tf.get_default_graph().get_tensor_by_name('name_of_thing')
+    def compute_gradients(self, generator_fn):
+        gradient_op = tf.get_default_graph().get_tensor_by_name(
+            'predict_network/prediction_feature_gradient/predict_network/sub_grad/Reshape:0')
         gradients = []
         targets = []
+        dim = self.predict_input_shape[0]
+        led_width_pix = int(self.deterministic_params['led_width'] * dim) // 2
+        # divide this by two to exclude duplicatte information
+        non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim)
         for input in generator_fn():
-            gradients.append(self.sess.run(gradient_op, feed_dict={self.predict_input_op: np.reshape(input[0], [1, -1])}))
-            targets.append(input[0])
-
-        #TODO: unreshape them, average over all examples?
-        #TODO: maybe also average all input images?
-
+            raw_gradient = self.sess.run(gradient_op, feed_dict={self.predict_input_op: np.reshape(input[0], [1, -1])})
+            first_half = raw_gradient[:raw_gradient.size //2]
+            second_half = raw_gradient[-raw_gradient.size // 2:]
+            img1 = np.reshape(first_half, [led_width_pix, non_led_width_pix])
+            img2 = np.reshape(second_half, [led_width_pix, non_led_width_pix])
+            #stack em together
+            targets.append(input[1])
+        return gradients, targets
 
     def evaluate_deterministic_graph(self):
         """
@@ -117,6 +124,24 @@ class DefocusNetwork:
                 break
 
         return linescans, targets.T  # return n x p and n x 1
+
+    def predict(self, generator_fn):
+        """
+        Compute predicted and target defocus for all data pairs provided by generator function
+        :param generator_fn:
+        :param recompute_normalizations:
+        :return:
+        """
+        prediction = np.array([])
+        target = np.array([])
+        for input in generator_fn():
+            pred_new = self.sess.run(self.predict_output_op,
+                                     feed_dict={self.predict_input_op: np.reshape(input[0], [1, -1])})
+            prediction = np.concatenate((prediction, pred_new))
+            target = np.concatenate((target, np.array([input[1]])))
+
+        pred_consensus, target_consensus = self._combine_predictions(prediction, target)
+        return pred_consensus, target_consensus
 
     def _train(self, load_variables=False):
         """
@@ -204,23 +229,6 @@ class DefocusNetwork:
         print("Export complete")
         return predict_input_tensor, predict_output_tensor
 
-    def predict(self, generator_fn):
-        """
-        Compute predicted and target defocus for all data pairs provided by generator function
-        :param generator_fn:
-        :param recompute_normalizations:
-        :return:
-        """
-        prediction = np.array([])
-        target = np.array([])
-        for input in generator_fn():
-            pred_new = self.sess.run(self.predict_output_op, feed_dict= {self.predict_input_op: np.reshape(input[0], [1,-1])})
-            prediction = np.concatenate((prediction, pred_new))
-            target = np.concatenate((target, np.array([input[1]])))
-
-        pred_consensus, target_consensus = self._combine_predictions(prediction,target)
-        return pred_consensus, target_consensus
-    
     def _combine_predictions(self, pred, target):
         """
         Take the median of all predictions coming from a single raw image--that is, all crops that came from the same
@@ -369,7 +377,8 @@ class DefocusNetwork:
 
             predictions = tf.squeeze(output, axis=1, name="output")
             #for calculating saliency map
-            tf.gradients(predictions, input_data, name="prediction_feature_gradient")
+            gradient = tf.gradients(predictions, input_data, name="prediction_feature_gradient")[0]
+            print(gradient.name)
             if graph_mode == 'predict':
                 return input_tensor, predictions
             if graph_mode == 'evaluate':
