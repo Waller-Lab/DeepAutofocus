@@ -83,9 +83,10 @@ class DefocusNetwork:
         gradients = []
         targets = []
         dim = self.predict_input_shape[0]
+        #divide this by two because it was used twice
         led_width_pix = int(self.deterministic_params['led_width'] * dim) // 2
         # divide this by two to exclude duplicatte information
-        non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim)
+        non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim) //2
         for input in generator_fn():
             raw_gradient = np.ravel(self.sess.run(gradient_op, feed_dict={self.predict_input_op: np.reshape(input[0], [1, -1])}))
             first_half = raw_gradient[:raw_gradient.size // 2]
@@ -318,6 +319,7 @@ class DefocusNetwork:
             ft = tf.fft2d(tf.cast(incoherent_sum, tf.complex64))
             # take low frequency part of fourier spectrum that encompasses the direction of th LED axis
             dim = ft.get_shape()[1].value
+            ##divide this by two because its used twice
             led_width_pix = int(self.deterministic_params['led_width'] * dim) // 2
             # divide this by two to exclude duplicatte information
             non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim) // 2
