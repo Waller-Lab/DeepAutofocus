@@ -283,11 +283,11 @@ def compile_deterministic_data(data_wrapper_list, postion_indices_list, focal_pl
         raise Exception('NAN detected in deterministic data')
     return features, targets
 
-def plot_results(pred, target, draw_rect=False):
+def plot_results(pred, target, draw_rect=False, color=None):
     #don't plot too many points
     indices = np.arange(pred.shape[0])
     np.random.shuffle(indices)
-    plt.plot(target[indices[:1500]], pred[indices[:1500]], '.')
+    plt.plot(target[indices[:500]], pred[indices[:500]], '.' if color is None else '{}.'.format(color))
     plt.xlabel('Target defocus (um)')
     plt.ylabel('Predicted defocus (um)')
     if draw_rect:
@@ -296,8 +296,8 @@ def plot_results(pred, target, draw_rect=False):
         height = (max_target - min_target)*np.sqrt(2)
         width = 2
         plt.gca().add_patch(mpatches.Rectangle([min_target, min_target+width/np.sqrt(2)], width, height,
-                                               angle=-45, color=[1, 0, 0, 0.2]))
-        plt.plot([min_target, max_target], [min_target, max_target], 'r-')
+                                               angle=-45, color=[0, 1, 0, 0.2]))
+        plt.plot([min_target, max_target], [min_target, max_target], 'g-')
 
 def cartToNa(point_list_cart, z_offset=8):
     """functions for calcuating the NA of an LED on the quasi-dome based on it's index for the quasi-dome illuminator
