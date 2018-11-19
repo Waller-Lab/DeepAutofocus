@@ -86,12 +86,13 @@ class DefocusNetwork:
         # divide this by two to exclude duplicatte information
         non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim)
         for input in generator_fn():
-            raw_gradient = self.sess.run(gradient_op, feed_dict={self.predict_input_op: np.reshape(input[0], [1, -1])})
-            first_half = raw_gradient[:raw_gradient.size //2]
+            raw_gradient = np.ravel(self.sess.run(gradient_op, feed_dict={self.predict_input_op: np.reshape(input[0], [1, -1])}))
+            first_half = raw_gradient[:raw_gradient.size // 2]
             second_half = raw_gradient[-raw_gradient.size // 2:]
             img1 = np.reshape(first_half, [led_width_pix, non_led_width_pix])
             img2 = np.reshape(second_half, [led_width_pix, non_led_width_pix])
             #stack em together
+            gradients.append(np.concatenate((img1, img2), axis=0))
             targets.append(input[1])
         return gradients, targets
 
@@ -318,7 +319,7 @@ class DefocusNetwork:
             dim = ft.get_shape()[1].value
             led_width_pix = int(self.deterministic_params['led_width'] * dim) // 2
             # divide this by two to exclude duplicatte information
-            non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim)
+            non_led_width_pix = int(self.deterministic_params['non_led_width'] * dim) // 2
             if 'architecture' in self.deterministic_params.keys() and self.deterministic_params['architecture'] == 'keep_it_real':
                 ft_real = tf.real(ft)
                 features = tf.concat([tf.layers.flatten(ft_real[:, :led_width_pix, :non_led_width_pix]),

@@ -239,7 +239,7 @@ def read_or_calc_design_mat(data_wrapper, position_indices, focal_planes, determ
     :param deterministic_params: dictionary of parameters describing the structure of the network
     :return:
     """
-    param_id_string = str(deterministic_params) + str(position_indices[0]) + '_' + str(len(position_indices))
+    param_id_string = 'new' + str(deterministic_params) + str(position_indices[0]) + '_' + str(len(position_indices))
     # compute or read from storage deterministic outputs
     feature_name = 'features_' + param_id_string
     defocus_name = 'defocus_dists_' + param_id_string
