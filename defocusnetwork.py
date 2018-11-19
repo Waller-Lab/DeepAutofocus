@@ -8,6 +8,7 @@ class DefocusNetwork:
 
     # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     
+
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None, **kwargs):
         """
@@ -58,7 +59,7 @@ class DefocusNetwork:
             elif train_mode == 'load':
                 #load full saved model instead of training
                 tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
-                self.predict_input_op = tf.get_default_graph().get_tensor_by_name('deterministic/Log:0')
+                self.predict_input_op = tf.get_default_graph().get_tensor_by_name('deterministic/truediv:0')
                 self.predict_output_op = tf.get_default_graph().get_tensor_by_name('predict_network/output:0')
             elif train_mode == 'finetune':
                 #load the normalization values form the old graph
