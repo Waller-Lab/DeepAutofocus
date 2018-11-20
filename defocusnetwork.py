@@ -63,10 +63,13 @@ class DefocusNetwork:
                 self.predict_output_op = tf.get_default_graph().get_tensor_by_name('predict_network/output:0')
             elif train_mode == 'finetune':
                 #load the normalization values form the old graph
+                #Might be able to replace this and not save and reopen session...
                 tf.saved_model.loader.load(self.sess, [tf.saved_model.tag_constants.SERVING], self.params['load_model_path'])
                 self.mean = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const:0'))
                 self.stddev = self.sess.run(tf.get_default_graph().get_tensor_by_name('predict_network/Const_1:0'))
+                self.sess.close()
                 tf.reset_default_graph()
+                self.sess = tf.Session()
                 predict_input_op, predict_output_op = self._train(load_variables=True)
                 self.predict_input_op = predict_input_op
                 self.predict_output_op = predict_output_op
@@ -382,7 +385,6 @@ class DefocusNetwork:
             predictions = tf.squeeze(output, axis=1, name="output")
             #for calculating saliency map
             gradient = tf.gradients(predictions, input_data, name="prediction_feature_gradient")[0]
-            print(gradient.name)
             if graph_mode == 'predict':
                 return input_tensor, predictions
             if graph_mode == 'evaluate':
