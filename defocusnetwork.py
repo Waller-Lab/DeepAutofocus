@@ -128,7 +128,7 @@ class DefocusNetwork:
 
         return linescans, targets.T  # return n x p and n x 1
 
-    def predict(self, generator_fn):
+    def predict(self, generator_fn, consensus=True):
         """
         Compute predicted and target defocus for all data pairs provided by generator function
         :param generator_fn:
@@ -142,9 +142,11 @@ class DefocusNetwork:
                                      feed_dict={self.predict_input_op: np.reshape(input[0], [1, -1])})
             prediction = np.concatenate((prediction, pred_new))
             target = np.concatenate((target, np.array([input[1]])))
-
-        pred_consensus, target_consensus = self._combine_predictions(prediction, target)
-        return pred_consensus, target_consensus
+        if consensus:
+            pred_consensus, target_consensus = self._combine_predictions(prediction, target)
+            return pred_consensus, target_consensus
+        else:
+            return prediction, target
 
     def _train(self, load_variables=False):
         """
