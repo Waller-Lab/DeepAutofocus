@@ -239,7 +239,7 @@ def read_or_calc_design_mat(data_wrapper, position_indices, focal_planes, determ
     :param deterministic_params: dictionary of parameters describing the structure of the network
     :return:
     """
-    param_id_string = 'new' + str(deterministic_params) + str(position_indices[0]) + '_' + str(len(position_indices))
+    param_id_string = 'new' + str(deterministic_params) + 'p' +'_'.join(map(str,position_indices))
     # compute or read from storage deterministic outputs
     feature_name = 'features_' + param_id_string
     defocus_name = 'defocus_dists_' + param_id_string
@@ -283,7 +283,7 @@ def compile_deterministic_data(data_wrapper_list, postion_indices_list, focal_pl
         raise Exception('NAN detected in deterministic data')
     return features, targets
 
-def plot_results(pred, target, color, draw_rect=False):
+def plot_results(pred, target, color, draw_rect=False, range=None):
     #don't plot too many points
     indices = np.arange(pred.shape[0])
     np.random.shuffle(indices)
@@ -294,10 +294,13 @@ def plot_results(pred, target, color, draw_rect=False):
         min_target = np.min(target)
         max_target = np.max(target)
         height = (max_target - min_target)*np.sqrt(2)
-        width = 2
+        width = 5
         plt.gca().add_patch(mpatches.Rectangle([min_target, min_target+width/np.sqrt(2)], width, height,
                                                angle=-45, color=[0, 1, 0, 0.2]))
 #         plt.plot([min_target, max_target], [min_target, max_target], 'g-')
+    if range is not None:
+        plt.ylim([-range[0], range[1]])
+        plt.xlim([-range[0], range[1]])
 
 def cartToNa(point_list_cart, z_offset=8):
     """functions for calcuating the NA of an LED on the quasi-dome based on it's index for the quasi-dome illuminator
@@ -349,6 +352,12 @@ def get_led_na(led_index):
     angles_xy = np.arcsin(np.abs(source_list_na))
     angle = np.arctan(np.sqrt(np.tan(angles_xy[:, 0])**2 + np.tan(angles_xy[:, 1])**2 ))
     return np.sin(angle[led_index - 1])
+
+def get_led_angle(led_index):
+    source_list_na, source_list_cart = loadLedPositonsFromJson('quasi_dome_design.json')
+    angles_xy = np.arcsin(np.abs(source_list_na))
+    angle = np.arctan(np.sqrt(np.tan(angles_xy[:, 0])**2 + np.tan(angles_xy[:, 1])**2 ))
+    return angle[led_index - 1] / (2*3.14) *360
 
 class MagellanWithAnnotation(MagellanDataset):
     """
