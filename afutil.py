@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy import interpolate
 from joblib import Parallel, delayed
+import dask.array as da
 
 from defocusnetwork import DefocusNetwork
 from imageprocessing import radialaverage
@@ -258,7 +259,7 @@ def read_or_calc_design_mat(data_wrapper, position_indices, focal_planes, determ
         data_wrapper.store_array(defocus_name, defocus_dists)
     return features, defocus_dists
 
-def compile_deterministic_data(data_wrapper_list, postion_indices_list, focal_planes, deterministic_params):
+def compile_deterministic_data(data_wrapper_list, postion_indices_list, focal_planes, deterministic_params, virtual=False):
     """
     For all hdf wrappers in data, load design matrix and targets and concatenate them
     Puts the data that has already been fourier transformed and flattened into design matrix
@@ -269,18 +270,26 @@ def compile_deterministic_data(data_wrapper_list, postion_indices_list, focal_pl
     """
     deterministic_train_data = [read_or_calc_design_mat(dataset, position_indices, focal_planes,
                 deterministic_params) for dataset, position_indices in zip(data_wrapper_list, postion_indices_list)]
+    
     # collect training data from all experiments
     features = []
     targets = []
     for f, t in deterministic_train_data:
+        if np.any(np.isnan(f)):
+            raise Exception('NAN detected in deterministic data')
         features.append(f)
         targets.append(t)
 
     #pool all data together
     targets = np.concatenate(targets)
-    features = np.concatenate(features)
-    if np.any(np.isnan(features)):
-        raise Exception('NAN detected in deterministic data')
+    #store in dask arrays to keep them on disk
+    if virtual:
+        da_features = [da.from_array(feature_vec, chunks=(1024, -1)) for feature_vec in features]
+        features = da.concatenate(da_features, axis=0)
+        
+    else:
+        features = np.concatenate(features)
+
     return features, targets
 
 def plot_results(pred, target, color, draw_rect=False, range=None):

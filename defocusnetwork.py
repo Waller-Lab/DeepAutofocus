@@ -4,10 +4,7 @@ import shutil
 import sys
 import os
 
-class DefocusNetwork:
-
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-    
+class DefocusNetwork:    
 
     def __init__(self, input_shape, train_generator, deterministic_params=None,
                  val_generator=None, predict_input_shape=None, train_mode=None, **kwargs):
@@ -52,7 +49,13 @@ class DefocusNetwork:
         if train_mode is not None:
             if train_mode == 'train':
                 #not using deterministic front end, but rather trainable backend
-                self._compute_normalizations(self.train_generator)
+                if 'normalizations' in kwargs.keys():
+                    print('loading normalizations')
+                    self.mean = kwargs['normalizations']['mean']
+                    self.stddev = kwargs['normalizations']['std']
+                else:  
+                    print('computing normalizations')
+                    self._compute_normalizations(self.train_generator)
                 predict_input_op, predict_output_op = self._train()
                 self.predict_input_op = predict_input_op
                 self.predict_output_op = predict_output_op
@@ -196,6 +199,7 @@ class DefocusNetwork:
         min_error_step = 0
         print("Training model...")
         while True:
+            print('Step: {}'.format(step))
             # make one training step
             self.sess.run(train_op)
             # train_log_writer.add_summary(summary, global_step=step)
