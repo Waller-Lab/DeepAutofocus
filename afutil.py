@@ -362,6 +362,10 @@ def get_led_na(led_index):
     angle = np.arctan(np.sqrt(np.tan(angles_xy[:, 0])**2 + np.tan(angles_xy[:, 1])**2 ))
     return np.sin(angle[led_index - 1])
 
+def get_led_nas(led_index):
+    source_list_na, source_list_cart = loadLedPositonsFromJson('quasi_dome_design.json')
+    return source_list_na[led_index - 1]
+
 def get_led_angle(led_index):
     source_list_na, source_list_cart = loadLedPositonsFromJson('quasi_dome_design.json')
     angles_xy = np.arcsin(np.abs(source_list_na))

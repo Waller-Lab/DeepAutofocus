@@ -199,7 +199,9 @@ class DefocusNetwork:
         min_error_step = 0
         print("Training model...")
         while True:
-            print('Step: {}'.format(step))
+            if 'total_steps' in self.hyper_params.keys() and step >= self.hyper_params['total_steps']:
+                break
+#             print('Step: {}'.format(step))
             # make one training step
             self.sess.run(train_op)
             # train_log_writer.add_summary(summary, global_step=step)
@@ -227,9 +229,7 @@ class DefocusNetwork:
                 elif step - min_error_step > self.hyper_params['val_overshoot_steps']:
                     break
             step += 1
-            if 'total_steps' in self.hyper_params.keys() and step > self.hyper_params['total_steps']:
-                break
-            # print(step)
+
         # saver.restore(self.sess, min_error_path)
         # export saved graph
         print("Exporting model...")

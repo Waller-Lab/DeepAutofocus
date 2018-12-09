@@ -151,7 +151,7 @@ class MagellanMultipageTiffReader:
             pixels = np.frombuffer(self._read(offset, offset + length), dtype=np.uint8)
         else:
             raise Exception('Unknown pixel type')
-        return np.reshape(pixels, [self.width, self.height])
+        return np.reshape(pixels, [self.height, self.width])
 
     def read_metadata(self, offset, length):
         return json.loads(self._read(offset, offset + length))
