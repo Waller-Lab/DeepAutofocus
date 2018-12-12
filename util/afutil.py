@@ -5,12 +5,12 @@ from scipy import interpolate
 from joblib import Parallel, delayed
 import dask.array as da
 
-from defocusnetwork import DefocusNetwork
-from imageprocessing import radialaverage
-from pygellan import MagellanDataset
+from util.defocusnetwork import DefocusNetwork
+from util.imageprocessing import radialaverage
+from util.pygellan import MagellanDataset
 import h5py
 import os
-from magellanhdf import MagellanHDFContainer
+from util.magellanhdf import MagellanHDFContainer
 import json
 
 
