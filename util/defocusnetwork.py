@@ -343,6 +343,12 @@ class DefocusNetwork:
 #                 rescale = tf.log(normalized_abs + np.finfo(np.float32).eps) / normalized_abs
 #                 normalized * rescale
                 return normalized
+            elif 'architecture' in self.deterministic_params.keys() and self.deterministic_params['architecture'] == 'keep_it_phase':
+                ft_angle = tf.angle(ft)
+                features = tf.concat([tf.layers.flatten(ft_angle[:, :led_width_pix, :non_led_width_pix]),
+                                      tf.layers.flatten(ft_angle[:, -led_width_pix:, :non_led_width_pix])], axis=1)
+                normalized = features / tf.expand_dims(tf.norm(features, axis=1), axis=1)
+                return normalized
             else:
                 ft_mag = tf.abs(ft)
                 features = tf.concat([tf.layers.flatten(ft_mag[:, :led_width_pix, :non_led_width_pix]),
